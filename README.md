@@ -1,4 +1,16 @@
-# vinext-starter
+# Zeexco Waitlist
+
+## Vercel deployment
+
+This project builds as a standard Next.js application on Vercel. Connect an
+Upstash Redis database from the Vercel Marketplace before accepting waitlist
+submissions. The integration must provide these server-side variables:
+
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+
+After connecting storage, redeploy so the variables are available to the
+waitlist API route.
 
 A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.
 
