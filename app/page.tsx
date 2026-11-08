@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { SiteFooter } from "../components/site-footer";
 
 export default function Home() {
   const [state, setState] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -51,9 +52,7 @@ export default function Home() {
         </div>
       </section>
 
-      <div className="context-note" aria-hidden="true">
-        <span>For shops, sellers &amp; growing businesses</span><span className="line" /><span>Lagos, Nigeria</span>
-      </div>
+      <SiteFooter className="home-footer" showContext />
     </main>
   );
 }
