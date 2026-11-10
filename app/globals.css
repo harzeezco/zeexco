@@ -51,6 +51,15 @@ button span { font-size: 22px; }
 .home-footer a { font-size: 10px; letter-spacing: .08em; }
 
 /* Legal and trust pages */
+.auth-page { min-height: 100svh; padding: 48px 24px; background: #fffaf4; color: #2a1710; }
+.auth-container { width: min(100%, 448px); margin-inline: auto; }
+.auth-brand { display: inline-block; margin-bottom: 40px; color: #2a1710; font-size: 20px; font-weight: 900; letter-spacing: -.04em; text-decoration: none; }
+.auth-brand span { color: #e6532f; }
+.auth-card { padding: 32px; border: 1px solid #eadbd1; border-radius: 18px; background: #fff; box-shadow: 0 20px 60px rgba(76,35,20,.08); }
+.auth-eyebrow { margin: 0 0 8px; color: #b53d1b; font-size: 12px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+.auth-title { margin: 0; color: #2a1710; font-family: Georgia, 'Times New Roman', serif; font-size: 36px; font-weight: 500; line-height: 1.08; letter-spacing: -.03em; }
+.auth-description { margin: 12px 0 28px; color: #73574c; font-size: 14px; line-height: 1.65; }
+
 .legal-page { min-height: 100svh; background: #fffaf4; color: #2a1710; }
 .legal-header { width: min(100% - 48px, 1120px); min-height: 84px; margin-inline: auto; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e8dcd3; }
 .legal-header .brand { color: #2a1710; }
@@ -88,6 +97,10 @@ button span { font-size: 22px; }
 }
 
 @media (max-width: 520px) {
+  .auth-page { padding: 28px 16px; }
+  .auth-brand { margin-bottom: 28px; }
+  .auth-card { padding: 22px 18px; border-radius: 16px; }
+  .auth-title { font-size: 32px; }
   .topbar, .hero-content, .home-footer { width: calc(100% - 32px); }
   .topbar { height: 68px; }
   .hero-content { gap: 18px; padding-top: min(19vh,150px); padding-bottom: 18px; }
