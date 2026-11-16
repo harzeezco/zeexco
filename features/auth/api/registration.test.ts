@@ -6,7 +6,7 @@ describe("registration API", () => {
   beforeEach(() => vi.restoreAllMocks());
 
   it("uses the web registration endpoint", async () => {
-    const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: {} });
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue({ data: {}, status: 202 });
     const payload = { first_name: "Wakil", last_name: "Azeez", business_name: "Wakil Stores", email: "wakil@example.com", password: "password1234" };
     await registerWebMerchant(payload);
     expect(post).toHaveBeenCalledWith("/api/v1/auth/register", payload);

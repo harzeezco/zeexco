@@ -1,0 +1,95 @@
+"use client";
+
+import Link from "next/link";
+import { CheckCircle2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { parseVerificationError, verifyEmail, type VerificationFailure } from "../api/email-verification";
+import { VerificationLayout } from "./verification-layout";
+
+type VerificationState = "loading" | "success" | VerificationFailure;
+
+const content: Record<VerificationFailure, { eyebrow: string; title: string; description: string }> = {
+  invalid: { eyebrow: "Invalid link", title: "This verification link is invalid.", description: "Check that you opened the complete link from your verification email." },
+  consumed: { eyebrow: "Already verified", title: "This link has already been used.", description: "Your email may already be verified. Try logging in to continue." },
+  expired: { eyebrow: "Link expired", title: "This verification link has expired.", description: "Return to registration or login to continue. A new link cannot be requested from this page." },
+  server: { eyebrow: "Verification unavailable", title: "Verification could not be completed.", description: "Something went wrong while activating your account. Please try again." },
+  network: { eyebrow: "Connection problem", title: "We could not connect to Zico.", description: "Check your connection, then try again." },
+};
+
+export function EmailVerification({ token }: { token?: string }) {
+  const [state, setState] = useState<VerificationState>(token ? "loading" : "invalid");
+  const [attempt, setAttempt] = useState(0);
+  const startedAttempt = useRef<number | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  const retry = useCallback(() => {
+    if (state === "loading") return;
+    setState("loading");
+    setAttempt((value) => value + 1);
+  }, [state]);
+
+  useEffect(() => {
+    if (!token || startedAttempt.current === attempt) return;
+    startedAttempt.current = attempt;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      controller.abort();
+      setState("network");
+    }, 15_000);
+    void verifyEmail(token, controller.signal)
+      .then(() => {
+        window.clearTimeout(timeout);
+        setState("success");
+      })
+      .catch((error: unknown) => {
+        window.clearTimeout(timeout);
+        if (!controller.signal.aborted) setState(parseVerificationError(error));
+      });
+  }, [attempt, token]);
+
+  useEffect(() => {
+    if (!token) return;
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.hash}`);
+  }, [token]);
+
+  useEffect(() => {
+    if (state !== "loading") headingRef.current?.focus();
+  }, [state]);
+
+  if (state === "loading") {
+    return (
+      <VerificationLayout eyebrow="Email verification" title="Verifying your email" description="Please wait while we activate your account." titleRef={headingRef}>
+        <div role="status" aria-live="polite" className="verification-notice">
+          <span className="h-6 w-6 shrink-0 motion-safe:animate-spin rounded-full border-2 border-[#dbe6fc] border-t-[#1954d8]" aria-hidden="true" />
+          <span><strong>Your email is being verified</strong>This will only take a moment. Please keep this page open.</span>
+        </div>
+      </VerificationLayout>
+    );
+  }
+
+  if (state === "success") {
+    return (
+      <VerificationLayout eyebrow="Email verified" title="Your account is complete" description="Your email has been verified and your account is ready. Log in to start managing your business." titleRef={headingRef}>
+        <div role="status" aria-live="polite" className="grid gap-5">
+          <div className="verification-notice"><CheckCircle2 className="size-6 shrink-0 text-[#1954d8]" aria-hidden="true" /><span><strong>You are all set</strong>Your email is confirmed. Welcome to Zico.</span></div>
+          <Link href="/login" className="verification-action">Log in</Link>
+        </div>
+      </VerificationLayout>
+    );
+  }
+
+  const details = content[state];
+  const retryable = state === "server" || state === "network";
+  return (
+    <VerificationLayout eyebrow={details.eyebrow} title={details.title} description={details.description} titleRef={headingRef}>
+      <div role="alert" aria-live="assertive" className="grid gap-3">
+        {retryable ? <Button type="button" onClick={retry} className="verification-action">Try again</Button> : null}
+        {state === "consumed" ? <Link href="/login" className="verification-action">Log in</Link> : null}
+        {state === "expired" ? <><Link href="/register" className="verification-action">Register again</Link><Link href="/login" className="auth-text-link">Return to login</Link></> : null}
+        {state === "invalid" ? <Link href="/register" className="verification-action">Return to registration</Link> : null}
+      </div>
+    </VerificationLayout>
+  );
+}
+

@@ -31,7 +31,7 @@ export function WhatsAppRegistrationFlow() {
   if (!validation.data?.valid) {
     return <StatusCard title="Registration issue" message="This registration link is not valid." />;
   }
-  if (mutation.isSuccess) return <StatusCard title="Your Zeexco business is ready" message="Your WhatsApp is connected to your Zeexco account. You can return to WhatsApp to continue." />;
+  if (mutation.isSuccess) return <StatusCard title="Your Zico business is ready" message="Your WhatsApp is connected to your Zico account. You can return to WhatsApp to continue." />;
 
   const onSubmit = form.handleSubmit((values) => {
     const email = values.email.trim();
@@ -39,7 +39,7 @@ export function WhatsAppRegistrationFlow() {
   });
 
   return (
-    <AuthLayout eyebrow="WhatsApp registration" title="Finish setting up" description="Add a few business details to finish connecting WhatsApp to Zeexco.">
+    <AuthLayout eyebrow="WhatsApp registration" title="Finish setting up" description="Add a few business details to finish connecting WhatsApp to Zico.">
       <form onSubmit={onSubmit} className="grid gap-4" noValidate>
         <RegistrationField id="first_name" label="First name" autoComplete="given-name" {...form.register("first_name")} error={form.formState.errors.first_name?.message} />
         <RegistrationField id="last_name" label="Last name" autoComplete="family-name" {...form.register("last_name")} error={form.formState.errors.last_name?.message} />

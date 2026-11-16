@@ -1,5 +1,17 @@
 # Zeexco Waitlist
 
+## Authentication frontend
+
+Set `NEXT_PUBLIC_API_BASE_URL` to the public base URL of the Zeexco API. Browser
+registration posts to `/api/v1/auth/register`; a `202` response with
+`next_step: "VERIFY_EMAIL"` leaves the user signed out and displays a check-email
+screen. Email links open `/verify-email?token=...`, which activates the account
+through `POST /api/v1/auth/verify-email` before sending the user to `/login`.
+
+Email-provider credentials and `EMAIL_VERIFICATION_HMAC_SECRET_BASE64` are
+backend-only and must never be added to a `NEXT_PUBLIC_*` variable. The frontend
+does not send either verification or welcome email.
+
 ## Vercel deployment
 
 This project builds as a standard Next.js application on Vercel. Connect an

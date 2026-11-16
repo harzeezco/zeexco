@@ -1,388 +1,233 @@
-Task 6.4B implementation is complete. Do NOT redesign or expand the feature.
+Implement the frontend changes required for Zeexco’s updated email-verification and account-activation backend.
 
-Your job is to perform final verification and reconcile the frontend against the actual Task 6.4A backend contract.
+Backend behavior already implemented
 
-## Development / E2E environment
 
-The Zeexco backend currently runs locally in Docker.
+1. Registration
 
-Backend API container/service:
+POST /api/v1/auth/register
 
-```text
-zeexco-api
-```
+A successful browser registration:
 
-Backend application/container port:
+- Creates the user with PENDING status.
+- Queues an email-verification message asynchronously.
+- Returns HTTP 202.
+- Does not log the user in.
+- Does not queue the welcome email yet.
+- The verification email is sent from:
+  Zeexco <no-reply@zeexco.com>
 
-```text
-8080
-```
+The response includes:
 
-Local host API base URL:
+- pending user information
+- business information
+- next_step: "VERIFY_EMAIL"
 
-```text
-http://localhost:8080
-```
+2. Verification link
 
-The hosted frontend is:
+The backend generates verification links using:
 
-```text
-https://www.zeexco.com
-```
+EMAIL_VERIFICATION_FRONTEND_URL=http://localhost:3000/verify-email
 
-For real WhatsApp E2E testing, the hosted frontend cannot use localhost directly.
+The resulting URL has this shape:
 
-We will expose:
+http://localhost:3000/verify-email?token=<signed-token>
 
-```text
-http://localhost:8080
-```
+3. Verify email endpoint
 
-through a Cloudflare Quick Tunnel:
+POST /api/v1/auth/verify-email
 
-```bash
-cloudflared tunnel --url http://localhost:8080
-```
+Request body:
 
-This produces a temporary HTTPS URL conceptually like:
-
-```text
-https://<random-name>.trycloudflare.com
-```
-
-The hosted frontend must use that HTTPS tunnel URL as:
-
-```env
-NEXT_PUBLIC_API_BASE_URL=https://<current-tunnel>.trycloudflare.com
-```
-
-Do NOT hardcode a specific Quick Tunnel hostname because Quick Tunnel URLs are ephemeral.
-
-Do NOT change the application to use `localhost:8080` from the production-hosted browser.
-
-The backend must allow the frontend origin:
-
-```text
-https://www.zeexco.com
-```
-
-through its existing CORS configuration.
-
-For local frontend development, the backend remains reachable directly at:
-
-```text
-http://localhost:8080
-```
-
----
-
-## 1. Verify the actual backend contract
-
-Inspect the Task 6.4A backend/OpenAPI implementation.
-
-Confirm exactly:
-
-- `GET /api/v1/whatsapp/onboarding/validate?token=...`
-- `POST /api/v1/whatsapp/onboarding/register`
-- `POST /api/v1/auth/register`
-
-Verify:
-
-- exact request bodies;
-- exact success response bodies;
-- HTTP status codes;
-- actual error response shape;
-- actual error-code field name;
-- actual error-code values;
-- behavior of `FIRST_PRODUCT_PENDING`;
-- whether web registration returns authentication/session information or requires subsequent login.
-
-Do not continue supporting guessed contracts if the backend proves otherwise.
-
-Update the frontend only where required to match the real backend.
-
----
-
-## 2. Confirm WhatsApp registration contract
-
-The intended contract is:
-
-```json
 {
-  "first_name": "Wakil",
-  "last_name": "Azeez",
-  "business_name": "Wakil Stores",
-  "onboarding_token": "<token>"
+  "token": "<signed-token>"
 }
-```
 
-or optionally:
+A successful request returns HTTP 204 with no response body.
 
-```json
+On the first successful verification, the backend atomically:
+
+- Changes the user from PENDING to ACTIVE.
+- Marks the email as verified.
+- Queues exactly one asynchronous welcome email.
+- Returns without waiting for Resend.
+
+The welcome email is sent from:
+
+Zeexco <hello@zeexco.com>
+
+4. Verification errors
+
+Handle these backend responses:
+
+- 400: invalid token or malformed request
+- 409: token has already been consumed
+- 410: token has expired
+- 500: verification could not be completed
+
+The backend may return error codes such as:
+
+- EMAIL_VERIFICATION_INVALID
+- EMAIL_VERIFICATION_CONSUMED
+- EMAIL_VERIFICATION_EXPIRED
+- EMAIL_VERIFICATION_FAILED
+
+Implementation requirements
+
+1. Registration flow
+
+Update the registration UI so that after a 202 response with:
+
+next_step: "VERIFY_EMAIL"
+
+the frontend does not attempt to authenticate or create a session.
+
+Show a confirmation screen containing:
+
+- A clear “Check your email” heading.
+- The registered email address when available.
+- An explanation that the user must verify their email before signing in.
+- A link or button to return to the login page.
+- No claim that the account is already active.
+
+Preserve the existing handling for validation errors, duplicate emails, network errors, and loading states.
+
+2. Verification page
+
+Create or update the Next.js route:
+
+/verify-email
+
+Read the token from the URL query string.
+
+When a token is present:
+
+- Send it to POST /api/v1/auth/verify-email.
+- Send the request only from the browser or through an appropriate server-side API wrapper that preserves the backend contract.
+- Do not expose backend secrets.
+- Prevent React development-mode rerenders from causing uncontrolled duplicate requests.
+- Show a loading state while verification is in progress.
+
+On HTTP 204:
+
+- Show that the account is active and ready.
+- Provide a clear “Log in” CTA.
+- Optionally redirect to /login after a short delay, but keep an accessible manual CTA.
+
+Handle errors with useful states:
+
+- Missing token:
+  “This verification link is invalid.”
+
+- 400 / EMAIL_VERIFICATION_INVALID:
+  “This verification link is invalid.”
+
+- 409 / EMAIL_VERIFICATION_CONSUMED:
+  Explain that the link has already been used and provide a login CTA. Do not repeatedly retry.
+
+- 410 / EMAIL_VERIFICATION_EXPIRED:
+  Explain that the link has expired. If no resend endpoint exists in the backend contract, do not display a functional resend button. Provide navigation back to registration or login instead.
+
+- 500 / EMAIL_VERIFICATION_FAILED:
+  Explain that verification could not be completed and allow a controlled retry.
+
+- Network failure:
+  Show a temporary connection error and allow retry.
+
+3. API contract
+
+Use the frontend’s existing API client and base URL configuration. Do not hardcode the backend host.
+
+The verification request must be exactly:
+
+POST /api/v1/auth/verify-email
+Content-Type: application/json
+
 {
-  "first_name": "Wakil",
-  "last_name": "Azeez",
-  "business_name": "Wakil Stores",
-  "email": "optional@example.com",
-  "onboarding_token": "<token>"
+  "token": "<token>"
 }
-```
 
-Verify that the frontend:
+Treat HTTP 204 as success without attempting to parse JSON.
 
-- never sends password;
-- never sends confirm_password;
-- omits empty email;
-- sends the onboarding token;
-- does not send WhatsApp number;
-- does not send provider identity;
-- does not send User ID;
-- does not send Business ID.
+Keep request and response types centralized with the existing authentication types.
 
----
+4. Security requirements
 
-## 3. Confirm Web registration contract
+Never add these variables to any `NEXT_PUBLIC_*` environment variable:
 
-Verify `/register` sends:
+- RESEND_API_KEY
+- RESEND_SECURITY_FROM_EMAIL
+- RESEND_LIFECYCLE_FROM_EMAIL
+- EMAIL_VERIFICATION_HMAC_SECRET_BASE64
 
-```json
-{
-  "first_name": "Wakil",
-  "last_name": "Azeez",
-  "business_name": "Wakil Stores",
-  "email": "wakil@example.com",
-  "password": "..."
-}
-```
+These values belong exclusively to the Go backend.
 
-`confirmPassword` is frontend validation only and must NOT be sent to the backend.
+The frontend only needs its existing public backend/API base URL. It must not send email directly or call Resend.
 
-No onboarding token should be sent.
+Do not log the verification token, include it in analytics events, persist it in localStorage, or place it in error-monitoring metadata.
 
----
+After reading the token, remove it from the visible browser URL with `router.replace` or the History API when doing so will not break the request lifecycle.
 
-## 4. Verify API base URL behavior
+5. Welcome email behavior
 
-Inspect `lib/api-client.ts`.
+Do not implement welcome-email sending in the frontend.
 
-Confirm:
+The backend queues the welcome email after successful verification. The verification page must not wait for, poll for, or report the delivery status of that email.
 
-```text
-NEXT_PUBLIC_API_BASE_URL
-```
+A temporary email-provider failure does not mean account activation failed.
 
-is used as the Axios base URL when configured.
+6. UX and accessibility
 
-The code must work with:
+Provide accessible loading, success, invalid, consumed, expired, server-error, and network-error states.
 
-```env
-NEXT_PUBLIC_API_BASE_URL=https://<cloudflare-quick-tunnel>.trycloudflare.com
-```
+Requirements:
 
-Do not append `/api` automatically unless that matches the actual backend route structure.
+- Keyboard-accessible buttons and links.
+- Clear focus behavior when state changes.
+- `aria-live` for asynchronous status messages where appropriate.
+- Responsive mobile layout.
+- No indefinite spinner.
+- Disable duplicate submissions while a verification request is active.
 
-For example, given:
+7. Tests
 
-```env
-NEXT_PUBLIC_API_BASE_URL=https://example.trycloudflare.com
-```
+Add or update tests covering:
 
-WhatsApp validation should resolve to:
+- Registration 202 with VERIFY_EMAIL shows the check-email screen.
+- Registration does not log in a PENDING user.
+- Missing verification token shows an invalid-link state.
+- A valid token is submitted correctly.
+- HTTP 204 shows activation success and login CTA.
+- The frontend does not parse a body from the 204 response.
+- HTTP 400 shows invalid-link state.
+- HTTP 409 shows already-used state and login CTA.
+- HTTP 410 shows expired-link state.
+- HTTP 500 allows controlled retry.
+- Network failure allows retry.
+- Duplicate renders or clicks do not create uncontrolled concurrent requests.
+- Tokens and backend secrets are not logged or persisted.
+- Existing authentication tests continue to pass.
 
-```text
-https://example.trycloudflare.com/api/v1/whatsapp/onboarding/validate?token=...
-```
+8. Documentation and validation
 
-and WhatsApp registration to:
+Update the frontend environment example and authentication documentation where necessary.
 
-```text
-https://example.trycloudflare.com/api/v1/whatsapp/onboarding/register
-```
+Run:
 
-Do not expose or log the onboarding token.
+- TypeScript type checking
+- linting
+- unit/component tests
+- production build
+- relevant end-to-end tests, if available
 
----
+Inspect the existing frontend architecture first and extend established authentication, API-client, routing, form, and design-system patterns instead of creating a parallel implementation.
 
-## 5. CORS reconciliation
+At completion, report:
 
-Confirm the backend CORS configuration permits requests originating from:
-
-```text
-https://www.zeexco.com
-```
-
-Do not solve CORS by allowing every origin globally unless the existing development policy explicitly requires that.
-
-The target E2E path is:
-
-```text
-www.zeexco.com
-        ↓
-Cloudflare HTTPS tunnel
-        ↓
-localhost:8080
-        ↓
-zeexco-api
-```
-
----
-
-## 6. Run automated tests
-
-Run the complete relevant Vitest suite.
-
-The previous run found DOM cleanup leakage and cleanup was added.
-
-Verify the fix with a fresh final run.
-
-Do not report PASS unless the final run actually passes.
-
----
-
-## 7. TypeScript
-
-Run the TypeScript typecheck after all current Task 6.4 changes.
-
-Report the exact result.
-
----
-
-## 8. Lint
-
-Run the normal lint command.
-
-Fix Task 6.4-related failures.
-
-Report the final result.
-
----
-
-## 9. Production build
-
-Run the normal Next.js production build.
-
-Verify:
-
-- `/register` builds;
-- `/whatsapp/register` builds;
-- App Router/Suspense requirements;
-- environment handling;
-- React Query integration.
-
-Report the final result.
-
----
-
-## 10. Security regression
-
-Confirm:
-
-- onboarding token is not rendered;
-- onboarding token is not logged;
-- onboarding token is not stored in localStorage;
-- onboarding token is not stored in sessionStorage;
-- onboarding token is not directly included in React Query query keys;
-- WhatsApp registration contains no password;
-- Web registration does not send onboarding tokens;
-- WhatsApp registration does not trust client-supplied WhatsApp identity.
-
----
-
-## 11. Route regression
-
-Confirm:
-
-```text
-/register
-→ Web registration
-```
-
-```text
-/whatsapp/register?token=...
-→ WhatsApp registration
-```
-
-and legacy:
-
-```text
-/register?token=...
-```
-
-redirects to the canonical WhatsApp route while preserving the token.
-
-There should be only one permanent WhatsApp registration implementation.
-
----
-
-## 12. Missing-token behavior
-
-Verify:
-
-```text
-/whatsapp/register
-```
-
-without a token shows the intended invalid-link state and does NOT display the registration form.
-
----
-
-## 13. Visual smoke check
-
-If browser tooling is available, perform a mobile-width smoke check of:
-
-- `/register`;
-- `/whatsapp/register` missing-token state;
-- valid-token WhatsApp registration if a safe development token exists.
-
-If no valid token exists, state this clearly.
-
----
-
-## 14. Do not expand scope
-
-Do NOT implement:
-
-- Products;
-- WhatsApp passwordless login;
-- Payments;
-- KYC;
-- account merging;
-- Redux;
-- staff management;
-- new authentication architecture.
-
----
-
-## 15. Final report
-
-Return:
-
-1. Backend contract inspected.
-2. Validation endpoint exact response.
-3. WhatsApp registration exact success response.
-4. Web registration exact success response.
-5. Actual backend error shape.
-6. Actual error-code field.
-7. Error codes reconciled.
-8. `FIRST_PRODUCT_PENDING` behavior.
-9. Web post-registration behavior.
-10. WhatsApp payload.
-11. Web payload.
-12. Axios base URL behavior.
-13. Local backend URL confirmed.
-14. Container/API port confirmed.
-15. Cloudflare tunnel compatibility confirmed.
-16. CORS compatibility confirmed.
-17. Vitest command/result.
-18. Tests passed/failed.
-19. Typecheck command/result.
-20. Lint command/result.
-21. Production-build command/result.
-22. Security regression result.
-23. Route regression result.
-24. Missing-token result.
-25. Visual smoke-check result.
-26. Files changed.
-27. Remaining blockers before real WhatsApp E2E.
-
-Do not start another feature.
+- files changed
+- routes/components introduced or updated
+- API types/client changes
+- environment variables required
+- test commands and results
+- any assumptions or backend mismatches
+- anything requiring manual browser or live integration verification
