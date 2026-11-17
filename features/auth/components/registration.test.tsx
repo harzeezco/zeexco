@@ -5,10 +5,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebRegistrationForm } from "./web-registration-form";
 import { WhatsAppRegistrationFlow } from "./whatsapp-registration-flow";
-import { RegistrationSuccess, saveRegistrationConfirmation } from "./registration-success";
+import {
+  RegistrationSuccess,
+  saveRegistrationConfirmation,
+} from "./registration-success";
 
 const webMutate = vi.fn();
-const whatsappMutate = vi.fn();
 const refetch = vi.fn();
 const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -18,15 +20,39 @@ afterEach(cleanup);
 
 vi.mock("next/navigation", () => ({
   useRouter: () => navigation,
-  useSearchParams: () => ({ get: (key: string) => key === "token" ? "secret-onboarding-token" : null }),
+  useSearchParams: () => ({
+    get: (key: string) => (key === "token" ? "secret-onboarding-token" : null),
+  }),
 }));
 
-vi.mock("../api/registration", () => ({
-  useRegisterWebMerchant: () => ({ mutate: webMutate, isPending: false, isError: false, isSuccess: false, ...webState }),
-  useRegisterWhatsAppMerchant: () => ({ mutate: whatsappMutate, isPending: false, isError: false, isSuccess: false }),
-  useValidateWhatsAppOnboarding: () => ({ data: { valid: true, status: "PENDING" }, isPending: false, isError: false, refetch }),
+vi.mock("../api/registration", async (original) => ({
+  ...(await original<typeof import("../api/registration")>()),
+  useRegisterWebMerchant: () => ({
+    mutate: webMutate,
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+    ...webState,
+  }),
   parseRegistrationError: () => "Registration failed.",
-  parseOnboardingError: () => ({ message: "Registration failed.", retryable: true }),
+}));
+
+vi.mock("../api/whatsapp-onboarding", async (original) => ({
+  ...(await original<typeof import("../api/whatsapp-onboarding")>()),
+  useRegisterWhatsAppMerchant: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+  }),
+  useValidateWhatsAppOnboarding: () => ({
+    data: { valid: true, status: "PENDING" },
+    isPending: false,
+    isError: false,
+    isFetching: false,
+    errorUpdatedAt: 0,
+    refetch,
+  }),
 }));
 
 describe("registration flows", () => {
@@ -38,17 +64,32 @@ describe("registration flows", () => {
 
   it("does not claim success when the confirmation route is opened without registration", () => {
     render(<RegistrationSuccess />);
-    expect(screen.queryByText("Registration successful")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go to registration" })).toHaveAttribute("href", "/register");
+    expect(
+      screen.queryByText("Registration successful"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Go to registration" }),
+    ).toHaveAttribute("href", "/register");
   });
 
   it("preserves the response message and email on the confirmation route", () => {
-    saveRegistrationConfirmation({ email: "merchant@example.com", message: "Your registration is complete. Please verify your email." });
+    saveRegistrationConfirmation({
+      email: "merchant@example.com",
+      message: "Your registration is complete. Please verify your email.",
+    });
     render(<RegistrationSuccess />);
-    expect(screen.getByRole("heading", { name: "Check your email" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Check your email" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("merchant@example.com")).toBeInTheDocument();
-    expect(screen.getByText("Your registration is complete. Please verify your email.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Return to login" })).toHaveAttribute("href", "/login");
+    expect(
+      screen.getByText(
+        "Your registration is complete. Please verify your email.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Return to login" }),
+    ).toHaveAttribute("href", "/login");
   });
 
   it("shows the check-email screen for a pending registration without authenticating", () => {
@@ -56,26 +97,37 @@ describe("registration flows", () => {
       isSuccess: true,
       data: {
         status_code: 202,
-        message: "Registration successful. Please check your email to activate your account.",
+        message:
+          "Registration successful. Please check your email to activate your account.",
       },
       variables: { email: "wakil@example.com" },
     };
     render(<WebRegistrationForm />);
-    expect(screen.getByRole("heading", { name: "Check your email" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Check your email" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("wakil@example.com")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Return to login" })).toHaveAttribute("href", "/login");
+    expect(
+      screen.getByRole("link", { name: "Return to login" }),
+    ).toHaveAttribute("href", "/login");
     expect(webMutate).not.toHaveBeenCalled();
     expect(screen.queryByText(/account is ready/i)).not.toBeInTheDocument();
   });
 
   it("renders the separate web registration fields and validates required values", async () => {
     render(<WebRegistrationForm />);
-    expect(screen.getByRole("heading", { name: "Create your Zico account" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Create your Zico account" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
     expect(screen.queryByLabelText("Confirm password")).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
-    expect(await screen.findByText("First name is required")).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create account" }),
+    );
+    expect(
+      await screen.findByText("First name is required"),
+    ).toBeInTheDocument();
     expect(screen.getByText("Last name is required")).toBeInTheDocument();
     expect(screen.getByText("Business name is required")).toBeInTheDocument();
     expect(screen.getByText("Email is required")).toBeInTheDocument();
@@ -85,31 +137,69 @@ describe("registration flows", () => {
 
   it("submits web registration without a token or confirm password", async () => {
     render(<WebRegistrationForm />);
-    await userEvent.type(screen.getByLabelText("First name"), "Wakil");
-    await userEvent.type(screen.getByLabelText("Last name"), "Azeez");
-    await userEvent.type(screen.getByLabelText("Business name"), "Wakil Stores");
-    await userEvent.type(screen.getByLabelText("Email address"), "wakil@example.com");
-    await userEvent.type(screen.getByLabelText("Password"), "password1234!");
-    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
-    expect(webMutate).toHaveBeenCalledWith({ first_name: "Wakil", last_name: "Azeez", business_name: "Wakil Stores", email: "wakil@example.com", password: "password1234!" }, expect.any(Object));
+    const user = userEvent.setup();
+    for (const [label, value] of [
+      ["First name", "Wakil"],
+      ["Last name", "Azeez"],
+      ["Business name", "Wakil Stores"],
+      ["Email address", "wakil@example.com"],
+      ["Password", "password1234!"],
+    ]) {
+      await user.click(screen.getByLabelText(label));
+      await user.paste(value);
+    }
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create account" }),
+    );
+    expect(webMutate).toHaveBeenCalledWith(
+      {
+        first_name: "Wakil",
+        last_name: "Azeez",
+        business_name: "Wakil Stores",
+        email: "wakil@example.com",
+        password: "password1234!",
+      },
+      expect.any(Object),
+    );
     const callbacks = webMutate.mock.calls[0][1];
-    act(() => callbacks.onSuccess({ status_code: 202, message: "Account created successfully" }));
+    act(() =>
+      callbacks.onSuccess({
+        status_code: 202,
+        message: "Account created successfully",
+      }),
+    );
     expect(navigation.replace).toHaveBeenCalledWith("/register/success");
-    expect(JSON.parse(sessionStorage.getItem("zico-registration-confirmation")!)).toEqual({ email: "wakil@example.com", message: "Account created successfully" });
-    expect(sessionStorage.getItem("zico-registration-confirmation")).not.toContain("password1234!");
+    expect(screen.getByLabelText("Password")).toHaveValue("");
+    expect(
+      JSON.parse(sessionStorage.getItem("zico-registration-confirmation")!),
+    ).toEqual({
+      email: "wakil@example.com",
+      message: "Account created successfully",
+    });
+    expect(
+      sessionStorage.getItem("zico-registration-confirmation"),
+    ).not.toContain("password1234!");
     act(() => callbacks.onError(new Error("Registration service unavailable")));
-    expect(toast.error).toHaveBeenCalledWith("Registration service unavailable");
+    expect(toast.error).toHaveBeenCalledWith(
+      "Registration service unavailable",
+    );
   });
 
   it("updates password errors while typing and clears them once all requirements are met", async () => {
     render(<WebRegistrationForm />);
     const password = screen.getByLabelText("Password");
     await userEvent.type(password, "password");
-    expect(await screen.findByText("Password must contain at least one number")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Password must contain at least one number"),
+    ).toBeInTheDocument();
     await userEvent.type(password, "1");
-    expect(await screen.findByText("Password must contain at least one symbol")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Password must contain at least one symbol"),
+    ).toBeInTheDocument();
     await userEvent.type(password, "!");
-    expect(screen.queryByText("Password must contain at least one symbol")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Password must contain at least one symbol"),
+    ).not.toBeInTheDocument();
     expect(password).toHaveAttribute("aria-invalid", "false");
   });
 
@@ -117,21 +207,32 @@ describe("registration flows", () => {
     render(<WebRegistrationForm />);
     const password = screen.getByLabelText("Password");
     expect(password).toHaveAttribute("type", "password");
-    await userEvent.click(screen.getByRole("button", { name: "Show password" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show password" }),
+    );
     expect(password).toHaveAttribute("type", "text");
     expect(webMutate).not.toHaveBeenCalled();
   });
 
-  it("shows a lighter WhatsApp form and omits an empty optional email", async () => {
-    render(<WhatsAppRegistrationFlow />);
-    expect(screen.getByLabelText("Email (optional)")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
-    expect(screen.queryByText("secret-onboarding-token")).not.toBeInTheDocument();
+  it("uses a separate required email/password form for WhatsApp signup", async () => {
+    render(<WhatsAppRegistrationFlow token="secret-onboarding-token" />);
+    expect(screen.getByLabelText("Email address")).toBeInTheDocument();
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
+    expect(
+      screen.queryByText("secret-onboarding-token"),
+    ).not.toBeInTheDocument();
 
     await userEvent.type(screen.getByLabelText("First name"), "Wakil");
     await userEvent.type(screen.getByLabelText("Last name"), "Azeez");
-    await userEvent.type(screen.getByLabelText("Business name"), "Wakil Stores");
-    await userEvent.click(screen.getByRole("button", { name: "Create my business" }));
-    expect(whatsappMutate).toHaveBeenCalledWith({ first_name: "Wakil", last_name: "Azeez", business_name: "Wakil Stores", onboarding_token: "secret-onboarding-token" });
+    await userEvent.type(
+      screen.getByLabelText("Business name"),
+      "Wakil Stores",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create account" }),
+    );
+    expect(await screen.findByText("Email is required")).toBeInTheDocument();
+    expect(screen.getByText("Password is required")).toBeInTheDocument();
+    expect(webMutate).not.toHaveBeenCalled();
   });
 });

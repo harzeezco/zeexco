@@ -1,11 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { passwordSchema, webRegistrationSchema, whatsappRegistrationSchema } from "./registration";
+import {
+  passwordSchema,
+  webRegistrationSchema,
+  whatsappRegistrationSchema,
+} from "./registration";
 
 describe("registration schemas", () => {
   it("requires a web password with at least eight characters", () => {
-    const base = { first_name: "Wakil", last_name: "Azeez", business_name: "Stores", email: "wakil@example.com" };
-    expect(webRegistrationSchema.safeParse({ ...base, password: "short" }).success).toBe(false);
-    expect(webRegistrationSchema.safeParse({ ...base, password: "password1!" }).success).toBe(true);
+    const base = {
+      first_name: "Wakil",
+      last_name: "Azeez",
+      business_name: "Stores",
+      email: "wakil@example.com",
+    };
+    expect(
+      webRegistrationSchema.safeParse({ ...base, password: "short" }).success,
+    ).toBe(false);
+    expect(
+      webRegistrationSchema.safeParse({ ...base, password: "password1!" })
+        .success,
+    ).toBe(true);
   });
 
   it.each([
@@ -21,22 +35,52 @@ describe("registration schemas", () => {
     if (!result.success) expect(result.error.issues[0].message).toBe(message);
   });
 
-  it.each(["password1!", "PASSWORD1!", "Abcdef1!"])("accepts either letter case: %s", (password) => {
-    expect(passwordSchema.safeParse(password).success).toBe(true);
-  });
+  it.each(["password1!", "PASSWORD1!", "Abcdef1!"])(
+    "accepts either letter case: %s",
+    (password) => {
+      expect(passwordSchema.safeParse(password).success).toBe(true);
+    },
+  );
 
-  it("allows an omitted WhatsApp email value but rejects malformed email", () => {
-    const base = { first_name: "Wakil", last_name: "Azeez", business_name: "Stores" };
-    expect(whatsappRegistrationSchema.safeParse({ ...base, email: "" }).success).toBe(true);
-    expect(whatsappRegistrationSchema.safeParse({ ...base, email: "not-email" }).success).toBe(false);
+  it("requires email and password for WhatsApp browser registration", () => {
+    const base = {
+      first_name: "Wakil",
+      last_name: "Azeez",
+      business_name: "Stores",
+      password: "Password1!",
+    };
+    expect(
+      whatsappRegistrationSchema.safeParse({ ...base, email: "" }).success,
+    ).toBe(false);
+    expect(
+      whatsappRegistrationSchema.safeParse({ ...base, email: "not-email" })
+        .success,
+    ).toBe(false);
+    expect(
+      whatsappRegistrationSchema.safeParse({
+        ...base,
+        email: "ada@example.com",
+        password: "",
+      }).success,
+    ).toBe(false);
+    expect(
+      whatsappRegistrationSchema.safeParse({
+        ...base,
+        email: "ada@example.com",
+      }).success,
+    ).toBe(true);
   });
 
   it("counts Unicode characters and UTF-8 bytes and preserves the exact password", () => {
     expect(passwordSchema.parse("  élève١! ")).toBe("  élève١! ");
     expect(passwordSchema.safeParse("😀😀😀😀😀a1!").success).toBe(true);
     expect(passwordSchema.safeParse("😀😀a1!").success).toBe(false);
-    expect(passwordSchema.safeParse("é".repeat(34) + "a1!x").success).toBe(true);
-    expect(passwordSchema.safeParse("é".repeat(35) + "a1!").success).toBe(false);
+    expect(passwordSchema.safeParse("é".repeat(34) + "a1!x").success).toBe(
+      true,
+    );
+    expect(passwordSchema.safeParse("é".repeat(35) + "a1!").success).toBe(
+      false,
+    );
     expect(passwordSchema.safeParse("letters١! ").success).toBe(true);
     expect(passwordSchema.safeParse("letters1\u0301").success).toBe(false);
   });

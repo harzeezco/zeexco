@@ -17,14 +17,6 @@ export interface RegistrationResponse {
   message: string;
 }
 
-// WhatsApp onboarding has a separate response contract.
-export interface WhatsAppRegistrationResponse {
-  status_code?: number;
-  message?: string;
-  user?: UserSummary;
-  business?: BusinessSummary;
-}
-
 export interface EmailVerificationRequest {
   token: string;
 }
