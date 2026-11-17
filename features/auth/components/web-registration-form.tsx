@@ -1,42 +1,134 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
+import { toast } from "sonner";
+import { normalizeApiError } from "@/lib/api-client";
 import { useForm } from "react-hook-form";
 import { Button } from "@/components/ui/button";
-import { parseRegistrationError, useRegisterWebMerchant } from "../api/registration";
-import { webRegistrationSchema, type WebRegistrationFormData } from "../schemas/registration";
-import { AuthLayout } from "./auth-layout";
+import {
+  parseRegistrationError,
+  useRegisterWebMerchant,
+} from "../api/registration";
+import { useRetryAfter } from "../use-retry-after";
+import {
+  webRegistrationSchema,
+  type WebRegistrationFormData,
+} from "../schemas/registration";
 import { FormFeedback } from "./form-feedback";
-import { RegistrationField } from "./registration-field";
+import { RegistrationFields } from "./registration-fields";
+import { RegistrationTerms } from "./registration-terms";
+import { WebRegistrationLayout } from "./web-registration-layout";
+import { AccountSwitch } from "./account-switch";
+import {
+  RegistrationConfirmation,
+  saveRegistrationConfirmation,
+} from "./registration-success";
 
 export function WebRegistrationForm() {
+  const router = useRouter();
   const mutation = useRegisterWebMerchant();
-  const form = useForm<WebRegistrationFormData>({ resolver: zodResolver(webRegistrationSchema), defaultValues: { first_name: "", last_name: "", business_name: "", email: "", password: "", confirm_password: "" } });
+  const [failureAt, setFailureAt] = useState(0);
+  const seconds = useRetryAfter(mutation.error, failureAt);
+  const form = useForm<WebRegistrationFormData>({
+    resolver: zodResolver(webRegistrationSchema),
+    defaultValues: {
+      first_name: "",
+      last_name: "",
+      business_name: "",
+      email: "",
+      password: "",
+    },
+    mode: "onBlur",
+  });
 
-  if (mutation.isSuccess) {
-    return <AuthLayout eyebrow="Account created" title="Welcome to Zeexco" description="Your business account is ready. You can continue to sign in."><Link href="/login" className="flex h-12 items-center justify-center rounded-md bg-[#e6532f] font-bold text-white no-underline">Continue to login</Link></AuthLayout>;
+  if (mutation.isSuccess && mutation.data) {
+    return (
+      <RegistrationConfirmation
+        email={mutation.variables?.email || form.getValues("email")}
+        message={mutation.data.message}
+      />
+    );
   }
+  const onSubmit = form.handleSubmit((values) => {
+    if (mutation.isPending || seconds > 0) return;
+    mutation.mutate(
+      {
+        first_name: values.first_name,
+        last_name: values.last_name,
+        business_name: values.business_name,
+        email: values.email,
+        password: values.password,
+      },
+      {
+        onSuccess: (response) => {
+          form.resetField("password");
+          const saved = saveRegistrationConfirmation({
+            email: values.email,
+            message:
+              response.message ||
+              "Your registration was successful. Verify your email to continue.",
+          });
+          if (saved) router.replace("/register/success");
+          else
+            window.history.replaceState(
+              window.history.state,
+              "",
+              "/register/success",
+            );
+        },
+        onError: (error) => {
+          setFailureAt(Date.now());
+          const details = normalizeApiError(error);
+          if (details.field && details.field in values) {
+            form.setError(details.field as keyof WebRegistrationFormData, {
+              type: "server",
+              message: details.message,
+            });
+          }
+          toast.error(details.message || parseRegistrationError(error));
+        },
+      },
+    );
+  });
 
-  const onSubmit = form.handleSubmit((values) => mutation.mutate({
-    first_name: values.first_name,
-    last_name: values.last_name,
-    business_name: values.business_name,
-    email: values.email,
-    password: values.password,
-  }));
   return (
-    <AuthLayout eyebrow="Web registration" title="Create your account" description="Set up your Zeexco business account with your email and password.">
-      <form onSubmit={onSubmit} className="grid gap-4" noValidate>
-        <RegistrationField id="first_name" label="First name" autoComplete="given-name" {...form.register("first_name")} error={form.formState.errors.first_name?.message} />
-        <RegistrationField id="last_name" label="Last name" autoComplete="family-name" {...form.register("last_name")} error={form.formState.errors.last_name?.message} />
-        <RegistrationField id="business_name" label="Business name" autoComplete="organization" {...form.register("business_name")} error={form.formState.errors.business_name?.message} />
-        <RegistrationField id="email" label="Email" type="email" inputMode="email" autoComplete="email" {...form.register("email")} error={form.formState.errors.email?.message} />
-        <RegistrationField id="password" label="Password" type="password" autoComplete="new-password" {...form.register("password")} error={form.formState.errors.password?.message} />
-        <RegistrationField id="confirm_password" label="Confirm password" type="password" autoComplete="new-password" {...form.register("confirm_password")} error={form.formState.errors.confirm_password?.message} />
-        {mutation.isError ? <FormFeedback message={parseRegistrationError(mutation.error)} /> : null}
-        <Button type="submit" disabled={mutation.isPending} className="mt-1 h-12 w-full bg-[#e6532f] text-white hover:bg-[#c94525]">{mutation.isPending ? "Creating account…" : "Create account"}</Button>
+    <WebRegistrationLayout>
+      <AccountSwitch page="register" />
+      <div className="mb-6">
+        <h1 className="m-0 text-[28px] leading-tight font-bold tracking-[-0.025em] text-[#14233d]">
+          Create your Zico account
+        </h1>
+        <p className="mt-2 mb-0 text-sm text-[#68778f]">
+          A simpler way to run your everyday business.
+        </p>
+      </div>
+
+      <form
+        onSubmit={onSubmit}
+        className="grid gap-4"
+        noValidate
+        aria-busy={mutation.isPending}
+      >
+        <RegistrationFields form={form} pending={mutation.isPending} />
+        {mutation.isError ? (
+          <FormFeedback message={parseRegistrationError(mutation.error)} />
+        ) : null}
+
+        {seconds > 0 ? (
+          <p role="status">Try again in {seconds} seconds.</p>
+        ) : null}
+        <Button
+          type="submit"
+          disabled={mutation.isPending || seconds > 0}
+          className="mt-1 h-11 w-full rounded-md bg-[#1f5bd8] text-sm font-bold text-white hover:bg-[#1749b7]"
+        >
+          {mutation.isPending ? "Creating account..." : "Create account"}
+        </Button>
       </form>
-    </AuthLayout>
+
+      <RegistrationTerms />
+    </WebRegistrationLayout>
   );
 }

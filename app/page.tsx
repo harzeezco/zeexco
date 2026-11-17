@@ -1,21 +1,17 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent } from "react";
+import { useJoinWaitlist } from "@/features/waitlist/api/waitlist";
 import { SiteFooter } from "../components/site-footer";
 
 export default function Home() {
-  const [state, setState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const mutation = useJoinWaitlist();
 
-  async function joinWaitlist(event: FormEvent<HTMLFormElement>) {
+  function joinWaitlist(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setState("loading");
+    if (mutation.isPending) return;
     const form = new FormData(event.currentTarget);
-    const response = await fetch("/api/waitlist", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: form.get("name"), phone: form.get("phone") }),
-    });
-    setState(response.ok ? "success" : "error");
+    mutation.mutate({ name: String(form.get("name") || ""), phone: String(form.get("phone") || "") });
   }
 
   return (
@@ -35,7 +31,7 @@ export default function Home() {
         </div>
 
         <div className="waitlist-panel">
-          {state === "success" ? (
+          {mutation.isSuccess ? (
             <div className="success" role="status">
               <span className="success-mark" aria-hidden="true">✓</span>
               <div><strong>You&apos;re on the list.</strong><p>We&apos;ll let you know when Zeexco is ready for early access.</p></div>
@@ -44,8 +40,8 @@ export default function Home() {
             <form onSubmit={joinWaitlist}>
               <label><span>Your name</span><input name="name" type="text" autoComplete="name" placeholder="Ada Okafor" required /></label>
               <label><span>Phone / WhatsApp number</span><input name="phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="0801 234 5678" required /></label>
-              <button type="submit" disabled={state === "loading"}>{state === "loading" ? "Joining…" : "Join the waitlist"}<span aria-hidden="true">↗</span></button>
-              {state === "error" && <p className="form-error" role="alert">Something went wrong. Please try again.</p>}
+              <button type="submit" disabled={mutation.isPending}>{mutation.isPending ? "Joining…" : "Join the waitlist"}<span aria-hidden="true">↗</span></button>
+              {mutation.isError && <p className="form-error" role="alert">Something went wrong. Please try again.</p>}
             </form>
           )}
           <p className="fine-print">Join us as we build Zeexco with real businesses.</p>

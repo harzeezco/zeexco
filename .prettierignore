@@ -1,0 +1,16 @@
+# Generated files and local tooling
+node_modules/
+.next/
+dist/
+out/
+coverage/
+.vinext/
+.wrangler/
+.sites-runtime/
+outputs/
+work/
+next-env.d.ts
+
+# Preserve the vendored shadcn sources, matching the ESLint exclusions.
+components/ui/
+hooks/use-mobile.ts
