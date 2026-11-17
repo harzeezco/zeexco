@@ -27,7 +27,7 @@ export function WebRegistrationForm() {
   });
 
   if (mutation.isSuccess && mutation.data) {
-    return <RegistrationConfirmation email={mutation.data.user?.email || form.getValues("email")} message={mutation.data.message || "Your registration was successful. Verify your email to continue."} />;
+    return <RegistrationConfirmation email={mutation.variables?.email || form.getValues("email")} message={mutation.data.message} />;
   }
   const onSubmit = form.handleSubmit((values) => mutation.mutate({
     first_name: values.first_name,
@@ -38,7 +38,7 @@ export function WebRegistrationForm() {
   }, {
     onSuccess: (response) => {
       if (saveRegistrationConfirmation({
-        email: response.user?.email || values.email,
+        email: values.email,
         message: response.message || "Your registration was successful. Verify your email to continue.",
       })) router.replace("/register/success");
     },

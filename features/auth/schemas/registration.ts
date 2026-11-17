@@ -5,11 +5,11 @@ const requiredName = (label: string) =>
 
 export const passwordSchema = z.string()
   .min(1, "Password is required")
-  .min(8, "Password must be at least 8 characters")
-  .max(72, "Password must be at most 72 characters")
-  .regex(/[a-zA-Z]/, "Password must contain at least one letter")
-  .regex(/[0-9]/, "Password must contain at least one number")
-  .regex(/[^a-zA-Z0-9\s]/, "Password must contain at least one symbol");
+  .refine((value) => Array.from(value).length >= 8, "Password must be at least 8 characters")
+  .refine((value) => new TextEncoder().encode(value).length <= 72, "Password must be at most 72 UTF-8 bytes")
+  .refine((value) => /\p{L}/u.test(value), "Password must contain at least one letter")
+  .refine((value) => /\p{Nd}/u.test(value), "Password must contain at least one number")
+  .refine((value) => /[\p{P}\p{S}]/u.test(value), "Password must contain at least one symbol");
 
 export const webRegistrationSchema = z.object({
   first_name: requiredName("First name").max(100, "First name must be at most 100 characters"),

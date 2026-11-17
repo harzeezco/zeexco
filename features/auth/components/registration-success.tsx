@@ -26,8 +26,6 @@ export function RegistrationConfirmation({ email, message }: Confirmation) {
         <h1 className="m-0 text-3xl font-bold tracking-tight text-[#14233d]">Check your email</h1>
         <p className="m-0 text-sm leading-6 text-[#64748b]">{message || "Your registration was successful."}</p>
         {email ? <p className="m-0 text-sm leading-6 text-[#475569]">We sent a verification link to <strong className="break-all text-[#14233d]">{email}</strong>.</p> : null}
-        <p className="m-0 text-sm leading-6 text-[#64748b]">Open the link in that email to activate your account. You must verify your email address before you can sign in.</p>
-        <div className="rounded-md bg-[#f3f6fc] p-4 text-sm leading-6 text-[#61708a]">Can’t find the email? Check your spam or junk folder.</div>
         <Link href="/login" className="verification-action">Return to login</Link>
       </div>
     </WebRegistrationLayout>

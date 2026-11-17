@@ -1,8 +1,16 @@
 import axios from "axios";
+import { useMutation } from "@tanstack/react-query";
 import { apiClient, normalizeApiError } from "@/lib/api-client";
 import type { EmailVerificationErrorCode, EmailVerificationRequest } from "../types";
 
 export type VerificationFailure = "invalid" | "consumed" | "expired" | "server" | "network";
+
+export function useVerifyEmail() {
+  return useMutation({
+    mutationFn: (token: string) => verifyEmail(token, AbortSignal.timeout(15_000)),
+    gcTime: 0,
+  });
+}
 
 export async function verifyEmail(token: string, signal?: AbortSignal): Promise<void> {
   const payload: EmailVerificationRequest = { token };

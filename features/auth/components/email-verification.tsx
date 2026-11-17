@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { parseVerificationError, verifyEmail, type VerificationFailure } from "../api/email-verification";
+import { parseVerificationError, useVerifyEmail, type VerificationFailure } from "../api/email-verification";
 import { VerificationLayout } from "./verification-layout";
 
 type VerificationState = "loading" | "success" | VerificationFailure;
@@ -18,35 +18,22 @@ const content: Record<VerificationFailure, { eyebrow: string; title: string; des
 };
 
 export function EmailVerification({ token }: { token?: string }) {
-  const [state, setState] = useState<VerificationState>(token ? "loading" : "invalid");
-  const [attempt, setAttempt] = useState(0);
-  const startedAttempt = useRef<number | null>(null);
+  const mutation = useVerifyEmail();
+  const { mutate } = mutation;
+  const state: VerificationState = !token ? "invalid" : mutation.isSuccess ? "success" : mutation.isError ? parseVerificationError(mutation.error) : "loading";
+  const startedToken = useRef<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
-  const retry = useCallback(() => {
-    if (state === "loading") return;
-    setState("loading");
-    setAttempt((value) => value + 1);
-  }, [state]);
+  function retry() {
+    if (!token || mutation.isPending) return;
+    mutate(token);
+  }
 
   useEffect(() => {
-    if (!token || startedAttempt.current === attempt) return;
-    startedAttempt.current = attempt;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => {
-      controller.abort();
-      setState("network");
-    }, 15_000);
-    void verifyEmail(token, controller.signal)
-      .then(() => {
-        window.clearTimeout(timeout);
-        setState("success");
-      })
-      .catch((error: unknown) => {
-        window.clearTimeout(timeout);
-        if (!controller.signal.aborted) setState(parseVerificationError(error));
-      });
-  }, [attempt, token]);
+    if (!token || startedToken.current === token) return;
+    startedToken.current = token;
+    mutate(token);
+  }, [mutate, token]);
 
   useEffect(() => {
     if (!token) return;

@@ -2,6 +2,7 @@
 import "./globals.css";
 import { QueryProvider } from "@/lib/query-client";
 import { Toaster } from "@/components/ui/sonner";
+import { SessionProvider } from "@/features/auth/components/session-provider";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://zeexco.com"),
@@ -16,7 +17,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <QueryProvider>{children}</QueryProvider>
+        <QueryProvider><SessionProvider>{children}</SessionProvider></QueryProvider>
         <Toaster richColors position="top-right" />
       </body>
     </html>

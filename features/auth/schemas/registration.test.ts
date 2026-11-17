@@ -30,4 +30,14 @@ describe("registration schemas", () => {
     expect(whatsappRegistrationSchema.safeParse({ ...base, email: "" }).success).toBe(true);
     expect(whatsappRegistrationSchema.safeParse({ ...base, email: "not-email" }).success).toBe(false);
   });
+
+  it("counts Unicode characters and UTF-8 bytes and preserves the exact password", () => {
+    expect(passwordSchema.parse("  élève١! ")).toBe("  élève١! ");
+    expect(passwordSchema.safeParse("😀😀😀😀😀a1!").success).toBe(true);
+    expect(passwordSchema.safeParse("😀😀a1!").success).toBe(false);
+    expect(passwordSchema.safeParse("é".repeat(34) + "a1!x").success).toBe(true);
+    expect(passwordSchema.safeParse("é".repeat(35) + "a1!").success).toBe(false);
+    expect(passwordSchema.safeParse("letters١! ").success).toBe(true);
+    expect(passwordSchema.safeParse("letters1\u0301").success).toBe(false);
+  });
 });

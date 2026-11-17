@@ -1,233 +1,161 @@
-Implement the frontend changes required for Zeexco’s updated email-verification and account-activation backend.
+Update the Zeexco frontend to match the backend’s cookie-based authentication and session endpoints. Inspect the existing API client, authentication state, forms, routing, and route guards before making changes. Follow the project’s established patterns.
 
-Backend behavior already implemented
+Backend contract
 
+1. Registration — POST /api/v1/auth/register
 
-1. Registration
-
-POST /api/v1/auth/register
-
-A successful browser registration:
-
-- Creates the user with PENDING status.
-- Queues an email-verification message asynchronously.
-- Returns HTTP 202.
-- Does not log the user in.
-- Does not queue the welcome email yet.
-- The verification email is sent from:
-  Zeexco <no-reply@zeexco.com>
-
-The response includes:
-
-- pending user information
-- business information
-- next_step: "VERIFY_EMAIL"
-
-2. Verification link
-
-The backend generates verification links using:
-
-EMAIL_VERIFICATION_FRONTEND_URL=http://localhost:3000/verify-email
-
-The resulting URL has this shape:
-
-http://localhost:3000/verify-email?token=<signed-token>
-
-3. Verify email endpoint
-
-POST /api/v1/auth/verify-email
-
-Request body:
-
+Request:
 {
-  "token": "<signed-token>"
+  "first_name": "...",
+  "last_name": "...",
+  "business_name": "...",
+  "email": "...",
+  "password": "..."
 }
 
-A successful request returns HTTP 204 with no response body.
-
-On the first successful verification, the backend atomically:
-
-- Changes the user from PENDING to ACTIVE.
-- Marks the email as verified.
-- Queues exactly one asynchronous welcome email.
-- Returns without waiting for Resend.
-
-The welcome email is sent from:
-
-Zeexco <hello@zeexco.com>
-
-4. Verification errors
-
-Handle these backend responses:
-
-- 400: invalid token or malformed request
-- 409: token has already been consumed
-- 410: token has expired
-- 500: verification could not be completed
-
-The backend may return error codes such as:
-
-- EMAIL_VERIFICATION_INVALID
-- EMAIL_VERIFICATION_CONSUMED
-- EMAIL_VERIFICATION_EXPIRED
-- EMAIL_VERIFICATION_FAILED
-
-Implementation requirements
-
-1. Registration flow
-
-Update the registration UI so that after a 202 response with:
-
-next_step: "VERIFY_EMAIL"
-
-the frontend does not attempt to authenticate or create a session.
-
-Show a confirmation screen containing:
-
-- A clear “Check your email” heading.
-- The registered email address when available.
-- An explanation that the user must verify their email before signing in.
-- A link or button to return to the login page.
-- No claim that the account is already active.
-
-Preserve the existing handling for validation errors, duplicate emails, network errors, and loading states.
-
-2. Verification page
-
-Create or update the Next.js route:
-
-/verify-email
-
-Read the token from the URL query string.
-
-When a token is present:
-
-- Send it to POST /api/v1/auth/verify-email.
-- Send the request only from the browser or through an appropriate server-side API wrapper that preserves the backend contract.
-- Do not expose backend secrets.
-- Prevent React development-mode rerenders from causing uncontrolled duplicate requests.
-- Show a loading state while verification is in progress.
-
-On HTTP 204:
-
-- Show that the account is active and ready.
-- Provide a clear “Log in” CTA.
-- Optionally redirect to /login after a short delay, but keep an accessible manual CTA.
-
-Handle errors with useful states:
-
-- Missing token:
-  “This verification link is invalid.”
-
-- 400 / EMAIL_VERIFICATION_INVALID:
-  “This verification link is invalid.”
-
-- 409 / EMAIL_VERIFICATION_CONSUMED:
-  Explain that the link has already been used and provide a login CTA. Do not repeatedly retry.
-
-- 410 / EMAIL_VERIFICATION_EXPIRED:
-  Explain that the link has expired. If no resend endpoint exists in the backend contract, do not display a functional resend button. Provide navigation back to registration or login instead.
-
-- 500 / EMAIL_VERIFICATION_FAILED:
-  Explain that verification could not be completed and allow a controlled retry.
-
-- Network failure:
-  Show a temporary connection error and allow retry.
-
-3. API contract
-
-Use the frontend’s existing API client and base URL configuration. Do not hardcode the backend host.
-
-The verification request must be exactly:
-
-POST /api/v1/auth/verify-email
-Content-Type: application/json
-
+Success: HTTP 202
 {
-  "token": "<token>"
+  "status_code": 202,
+  "message": "Registration successful. Please check your email to activate your account."
 }
 
-Treat HTTP 204 as success without attempting to parse JSON.
+Registration does not return user details, business details, tokens, or next_step. It does not create an authenticated session. Show the verification instructions and require email verification before login.
 
-Keep request and response types centralized with the existing authentication types.
+Passwords require:
+- At least 8 characters.
+- At most 72 UTF-8 bytes.
+- At least one letter, uppercase OR lowercase; both cases are not required.
+- At least one decimal digit.
+- At least one punctuation or symbol character. Spaces do not count as symbols.
+- Preserve the password exactly; do not trim it.
 
-4. Security requirements
+Keep frontend validation aligned with backend Unicode handling and show backend validation messages.
 
-Never add these variables to any `NEXT_PUBLIC_*` environment variable:
+2. Login — POST /api/v1/auth/login
 
-- RESEND_API_KEY
-- RESEND_SECURITY_FROM_EMAIL
-- RESEND_LIFECYCLE_FROM_EMAIL
-- EMAIL_VERIFICATION_HMAC_SECRET_BASE64
+Request:
+{
+  "email": "...",
+  "password": "..."
+}
 
-These values belong exclusively to the Go backend.
+Success: HTTP 200
+{
+  "status_code": 200,
+  "message": "Login successful. Welcome back"
+}
 
-The frontend only needs its existing public backend/API base URL. It must not send email directly or call Resend.
+The backend sets HttpOnly access and refresh cookies. No tokens or account details appear in the response.
 
-Do not log the verification token, include it in analytics events, persist it in localStorage, or place it in error-monitoring metadata.
+After login succeeds, fetch GET /api/v1/auth/session before entering the authenticated platform.
 
-After reading the token, remove it from the visible browser URL with `router.replace` or the History API when doing so will not break the request lifecycle.
+Pending-verification login returns HTTP 403:
+{
+  "error": {
+    "code": "EMAIL_VERIFICATION_REQUIRED",
+    "message": "Account is pending verification. Please check your email to activate your account."
+  }
+}
 
-5. Welcome email behavior
+Display this message and keep the user unauthenticated.
 
-Do not implement welcome-email sending in the frontend.
+3. Session — GET /api/v1/auth/session
 
-The backend queues the welcome email after successful verification. The verification page must not wait for, poll for, or report the delivery status of that email.
+Send cookies with the request.
 
-A temporary email-provider failure does not mean account activation failed.
+Success: HTTP 200
+{
+  "status_code": 200,
+  "message": "Session retrieved successfully.",
+  "user": {
+    "id": "...",
+    "first_name": "...",
+    "last_name": "...",
+    "email": "...",
+    "status": "ACTIVE"
+  },
+  "businesses": [
+    {
+      "id": "...",
+      "name": "...",
+      "status": "ACTIVE",
+      "membership_role": "OWNER"
+    }
+  ]
+}
 
-6. UX and accessibility
+Use this endpoint after login and during application startup/page reload to initialize authentication and authorization state.
 
-Provide accessible loading, success, invalid, consumed, expired, server-error, and network-error states.
+Membership roles are OWNER, ADMIN, or STAFF. Business status may be ACTIVE or SUSPENDED. Use current memberships and existing product rules to control navigation and UI actions; do not invent a permission matrix or assume every user is an owner.
 
-Requirements:
+Handle an empty businesses array gracefully. If the selected business is no longer available, clear that selection and use the existing business-selection/onboarding flow.
 
-- Keyboard-accessible buttons and links.
-- Clear focus behavior when state changes.
-- `aria-live` for asynchronous status messages where appropriate.
-- Responsive mobile layout.
-- No indefinite spinner.
-- Disable duplicate submissions while a verification request is active.
+Session responses:
+- 401: Missing, invalid, expired token, or account no longer exists.
+- 403: Account is no longer active.
+- 500: Session lookup failed. Show a recoverable error rather than treating it as invalid credentials.
 
-7. Tests
+GET session does not renew cookies.
 
-Add or update tests covering:
+4. Refresh — POST /api/v1/auth/refresh
 
-- Registration 202 with VERIFY_EMAIL shows the check-email screen.
-- Registration does not log in a PENDING user.
-- Missing verification token shows an invalid-link state.
-- A valid token is submitted correctly.
-- HTTP 204 shows activation success and login CTA.
-- The frontend does not parse a body from the 204 response.
-- HTTP 400 shows invalid-link state.
-- HTTP 409 shows already-used state and login CTA.
-- HTTP 410 shows expired-link state.
-- HTTP 500 allows controlled retry.
-- Network failure allows retry.
-- Duplicate renders or clicks do not create uncontrolled concurrent requests.
-- Tokens and backend secrets are not logged or persisted.
-- Existing authentication tests continue to pass.
+No token in the request body. Send cookies.
 
-8. Documentation and validation
+Success: HTTP 200
+{
+  "status_code": 200,
+  "message": "Session refreshed successfully."
+}
 
-Update the frontend environment example and authentication documentation where necessary.
+The backend renews the access cookie and rotates the refresh cookie. No tokens, user details, or businesses appear in the response.
 
-Run:
+Implement one shared refresh operation for concurrent 401 responses:
+- Refresh once, then retry the original request once.
+- Concurrent requests must share the same refresh promise.
+- Do not recursively intercept login, registration, verification, refresh, or logout errors.
+- Never loop refresh attempts.
+- If refresh returns 401, clear frontend session state and redirect to login.
+- Handle network/5xx failures as recoverable errors without retry loops or falsely reporting invalid credentials.
+- Prevent an in-flight refresh or session request from restoring frontend authentication after logout.
+- During startup, a session 401 may trigger refresh once, followed by one session retry.
 
-- TypeScript type checking
-- linting
-- unit/component tests
-- production build
-- relevant end-to-end tests, if available
+5. Logout — POST /api/v1/auth/logout
 
-Inspect the existing frontend architecture first and extend established authentication, API-client, routing, form, and design-system patterns instead of creating a parallel implementation.
+Send cookies. Success is HTTP 204 with no JSON body. The backend revokes the refresh session and expires both cookies.
 
-At completion, report:
+On successful logout, clear authentication state, selected business, and cached tenant data, then redirect to login. Handle a failed logout explicitly; frontend JavaScript cannot clear the HttpOnly cookies.
 
-- files changed
-- routes/components introduced or updated
-- API types/client changes
-- environment variables required
-- test commands and results
-- any assumptions or backend mismatches
-- anything requiring manual browser or live integration verification
+Cookie and API-client requirements
+
+- Use fetch credentials: "include", or Axios withCredentials: true, for authentication and protected API requests.
+- Remove token extraction from login/refresh response bodies.
+- Remove browser token storage, manual JWT decoding, and frontend-generated Authorization headers.
+- Remove legacy token entries from localStorage/sessionStorage without clearing unrelated application data.
+- Never attempt to read HttpOnly cookies using JavaScript.
+- Use the configured backend base URL; do not hardcode localhost into production code.
+- Login, refresh, logout, and other unsafe cookie-authenticated requests require an Origin matching the backend PUBLIC_FRONTEND_BASE_URL. Browsers supply Origin automatically; do not attempt to set it manually.
+- For local HTTP development, the backend must use AUTH_REFRESH_COOKIE_SECURE=false and PUBLIC_FRONTEND_BASE_URL matching the exact frontend origin. Keep production cookies Secure.
+
+Authentication state and routing
+
+- Represent loading/checking, authenticated, unauthenticated, and recoverable-error states explicitly.
+- Wait for the initial session check before redirecting protected routes, avoiding a login-page flash.
+- Preserve a validated internal return destination when redirecting to login.
+- Scope cached business data by business ID and clear it when changing accounts or businesses.
+- Backend authorization remains authoritative; UI visibility is not a security boundary.
+- Keep login and refresh responses limited to their actual status/message contract.
+
+Verification
+
+Add or update focused tests for:
+- Registration status/message handling and password validation.
+- Login followed by session loading.
+- Pending-verification login.
+- Session restoration after page reload.
+- One refresh shared by concurrent 401 responses.
+- Retry limits and invalid-refresh handling.
+- Recoverable session/network failures.
+- Logout, including in-flight refresh/session races.
+- Empty memberships, suspended accounts/businesses, and business selection.
+
+Run the relevant tests and production build. Implement the changes fully, then summarize what changed, validation results, and any backend configuration needed. Do not modify unrelated features.

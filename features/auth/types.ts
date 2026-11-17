@@ -13,11 +13,16 @@ export interface BusinessSummary {
 }
 
 export interface RegistrationResponse {
+  status_code: 202;
+  message: string;
+}
+
+// WhatsApp onboarding has a separate response contract.
+export interface WhatsAppRegistrationResponse {
   status_code?: number;
   message?: string;
-  user: UserSummary;
-  business: BusinessSummary;
-  next_step: "VERIFY_EMAIL" | "ADD_FIRST_PRODUCT";
+  user?: UserSummary;
+  business?: BusinessSummary;
 }
 
 export interface EmailVerificationRequest {

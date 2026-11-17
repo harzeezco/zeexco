@@ -55,10 +55,10 @@ describe("registration flows", () => {
     webState = {
       isSuccess: true,
       data: {
-        user: { email: "wakil@example.com", status: "PENDING" },
-        business: { status: "PENDING" },
-        next_step: "VERIFY_EMAIL",
+        status_code: 202,
+        message: "Registration successful. Please check your email to activate your account.",
       },
+      variables: { email: "wakil@example.com" },
     };
     render(<WebRegistrationForm />);
     expect(screen.getByRole("heading", { name: "Check your email" })).toBeInTheDocument();
@@ -93,7 +93,7 @@ describe("registration flows", () => {
     await userEvent.click(screen.getByRole("button", { name: "Create account" }));
     expect(webMutate).toHaveBeenCalledWith({ first_name: "Wakil", last_name: "Azeez", business_name: "Wakil Stores", email: "wakil@example.com", password: "password1234!" }, expect.any(Object));
     const callbacks = webMutate.mock.calls[0][1];
-    act(() => callbacks.onSuccess({ status_code: 200, message: "Account created successfully" }));
+    act(() => callbacks.onSuccess({ status_code: 202, message: "Account created successfully" }));
     expect(navigation.replace).toHaveBeenCalledWith("/register/success");
     expect(JSON.parse(sessionStorage.getItem("zico-registration-confirmation")!)).toEqual({ email: "wakil@example.com", message: "Account created successfully" });
     expect(sessionStorage.getItem("zico-registration-confirmation")).not.toContain("password1234!");

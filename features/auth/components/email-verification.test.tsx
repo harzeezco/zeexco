@@ -1,5 +1,7 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render as renderComponent, screen, waitFor } from "@testing-library/react";
+import { QueryProvider } from "@/lib/query-client";
+import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,9 +9,16 @@ import { EmailVerification } from "./email-verification";
 
 const verification = vi.hoisted(() => ({ verify: vi.fn(), parse: vi.fn() }));
 
-vi.mock("../api/email-verification", () => ({
-  verifyEmail: verification.verify,
+const render = (ui: ReactElement) => renderComponent(ui, { wrapper: QueryProvider });
+
+vi.mock("../api/email-verification", async (original) => ({
+  ...await original<typeof import("../api/email-verification")>(),
   parseVerificationError: verification.parse,
+}));
+
+vi.mock("@/lib/api-client", () => ({
+  apiClient: { post: (...args: unknown[]) => verification.verify(...args).then(() => ({ status: 204 })) },
+  normalizeApiError: vi.fn(),
 }));
 
 describe("email verification screen", () => {
@@ -33,7 +42,7 @@ describe("email verification screen", () => {
     expect(await screen.findByRole("heading", { name: "Your account is complete" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Log in" })).toHaveAttribute("href", "/login");
     expect(verification.verify).toHaveBeenCalledTimes(1);
-    expect(verification.verify.mock.calls[0][0]).toBe("opaque-signed-token");
+    expect(verification.verify.mock.calls[0][1]).toEqual({ token: "opaque-signed-token" });
     expect(window.location.search).toBe("");
   });
 

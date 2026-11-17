@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, isNetworkOrServerError, normalizeApiError } from "@/lib/api-client";
-import type { RegistrationResponse } from "../types";
+import type { RegistrationResponse, WhatsAppRegistrationResponse } from "../types";
 
 export interface WebRegistrationRequest {
   first_name: string;
@@ -40,12 +40,12 @@ export async function validateWhatsAppOnboarding(token: string) {
 }
 
 export async function registerWhatsAppMerchant(payload: WhatsAppRegistrationRequest) {
-  const { data } = await apiClient.post<RegistrationResponse>("/api/v1/whatsapp/onboarding/register", payload);
+  const { data } = await apiClient.post<WhatsAppRegistrationResponse>("/api/v1/whatsapp/onboarding/register", payload);
   return data;
 }
 
 export function useRegisterWebMerchant() {
-  return useMutation({ mutationFn: registerWebMerchant });
+  return useMutation({ mutationFn: registerWebMerchant, gcTime: 0 });
 }
 
 export function useValidateWhatsAppOnboarding(token: string | null) {

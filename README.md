@@ -3,8 +3,8 @@
 ## Authentication frontend
 
 Set `NEXT_PUBLIC_API_BASE_URL` to the public base URL of the Zeexco API. Browser
-registration posts to `/api/v1/auth/register`; a `202` response with
-`next_step: "VERIFY_EMAIL"` leaves the user signed out and displays a check-email
+registration posts to `/api/v1/auth/register`; a `202` status/message response
+leaves the user signed out and displays a check-email
 screen. Email links open `/verify-email?token=...`, which activates the account
 through `POST /api/v1/auth/verify-email` before sending the user to `/login`.
 
@@ -152,6 +152,16 @@ When using the Sites plugin, follow its skill instructions for installation, bui
 The portable build runs Vinext directly without a host `timeout` command. The managed-linux build uses `scripts/build-verified.sh` and its existing `SITES_BUILD_TIMEOUT` setting.
 
 ## Learn More
+
+### Backend authentication
+
+Set `NEXT_PUBLIC_API_BASE_URL` to the backend origin. Authentication and protected requests send browser-managed HttpOnly cookies with `withCredentials: true`. Login and refresh return only status/message objects. The frontend never reads cookies, stores tokens, decodes JWTs, or generates Authorization headers. It removes known legacy token storage entries without clearing unrelated browser data.
+
+Deploy the frontend over HTTPS and align the backend's `PUBLIC_FRONTEND_BASE_URL`, credentialed CORS origin, and cookie Secure/SameSite settings with the exact frontend origin. Keep production cookies Secure. For local HTTP development only, set backend `AUTH_REFRESH_COOKIE_SECURE=false` and `PUBLIC_FRONTEND_BASE_URL` to the exact local frontend origin, including port. The browser supplies Origin automatically. Cross-origin cookies require compatible SameSite settings and credentialed CORS; expose `Retry-After` if the frontend should read it. Otherwise rate limits use a 60-second fallback.
+
+Successful login loads `GET /api/v1/auth/session` before navigating to a validated internal destination (default `/account`). Startup also checks GET session, which does not renew cookies. Protected API calls must use `authenticatedApiClient` from `features/auth/api/session.ts`: concurrent 401s share one POST refresh, then each original request retries once. Public auth endpoints use the base client and are never recursively intercepted. Invalid sessions redirect protected pages to login; network/5xx failures expose an explicit retry. Logout revokes cookies before clearing session state and cached data, and stale in-flight responses cannot restore authentication.
+
+The account page handles empty memberships, multiple businesses, suspended businesses, and the backend's current OWNER/ADMIN/STAFF roles. It does not invent role permissions. Business selection lives in the session store and is reconciled against each session response. Use `tenantQueryKey(...)` for future tenant queries; it scopes keys by account and selected business. The session provider removes cached queries when the account or business changes. No business onboarding endpoint exists in this frontend yet.
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
 - [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
