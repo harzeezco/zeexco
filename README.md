@@ -1,5 +1,73 @@
 # Zeexco Waitlist
 
+## Local Git checks
+
+`npm install` enables Husky through the `prepare` script. Before each commit,
+Husky runs the full test suite, ESLint, and a Prettier check on staged files.
+Any failure blocks the commit. Fix formatting with
+`npx prettier --write <file>` and stage the changes again. Generated files and
+vendored shadcn sources are excluded from formatting.
+
+Before each push, Husky runs `npm run build`; a failed production build blocks
+the push. Run `npm run precommit` or `npm run prepush` to check manually.
+`npm run format` formats the repository, and `npm run format:check` checks all
+supported files. Existing files are adopted into formatting checks as they are
+staged; the commit hook does not require a repository-wide formatting migration.
+
+## Authentication frontend
+
+Set `NEXT_PUBLIC_API_BASE_URL` to the public base URL of the Zeexco API. Browser
+registration posts to `/api/v1/auth/register`; a `202` status/message response
+leaves the user signed out and displays a check-email
+screen. Email links open `/verify-email?token=...`, which activates the account
+through `POST /api/v1/auth/verify-email` before sending the user to `/login`.
+
+Email-provider credentials and `EMAIL_VERIFICATION_HMAC_SECRET_BASE64` are
+backend-only and must never be added to a `NEXT_PUBLIC_*` variable. The frontend
+does not send either verification or welcome email.
+
+## WhatsApp browser registration
+
+WhatsApp Get started links open `/register?token=...`. The browser validates the
+opaque onboarding token before showing the dedicated WhatsApp email/password
+form. WhatsApp onboarding has its own API module and submits once to
+`/api/v1/whatsapp/onboarding/register` with the onboarding token. Ordinary web
+registration remains separate and uses `/api/v1/auth/register` without a token.
+Only field, validation, and visual components are shared. The legacy
+`/whatsapp/register?token=...` entry uses the WhatsApp flow.
+Empty/repeated parameters are rejected, and expired or consumed links
+provide guidance to return to the original WhatsApp chat. Pending verification
+shows Check your email, and rate limits respect `Retry-After`.
+
+Registration replaces the token-bearing URL with `/register/success`. Only the
+email, confirmation message, and WhatsApp journey flag may be saved for that
+screen; passwords and onboarding/activation tokens are never persisted. These
+routes use a no-referrer policy and local assets. WhatsApp registration,
+Check your email, and activation never initialize or restore a browser session.
+SessionProvider is mounted only on login and protected account routes.
+Registration and activation do not log the browser in or link an existing
+account by matching email. WhatsApp continuation occurs after email activation.
+
+The email route sends only its separate signed verification token. A 204
+activation shows the ordinary login action. A 200 response with
+`next_step: "CONTINUE_IN_WHATSAPP"` shows a user-clicked Continue in WhatsApp
+action using the backend's `redirect_url`. Only HTTPS `wa.me` destinations
+without credentials and with a phone-number path are accepted. Missing or
+unsafe destinations show instructions to return to the existing chat manually.
+Opening the chat prefills the message; the merchant must tap Send.
+
+Configure `WHATSAPP_ONBOARDING_RETURN_URL=https://wa.me/15551892941` on the
+backend for the development test account. The frontend has no WhatsApp phone
+number setting. The backend supplies the destination and prefilled Continue
+text, and must implement the pending-verification validation response and the
+200 WhatsApp activation contract. Keep `PUBLIC_FRONTEND_BASE_URL` equal to the
+exact frontend origin and use the existing credentialed CORS/cookie setup.
+Native WhatsApp Flow publication and authenticated existing-account linking
+remain backend work. See the backend's
+`docs/flows/whatsapp-browser-registration.md` and OpenAPI contract for the server
+flow. Automated browser checks use mocked responses and do not send live
+WhatsApp messages.
+
 ## Vercel deployment
 
 This project builds as a standard Next.js application on Vercel. Connect an
@@ -84,7 +152,9 @@ export default async function Home() {
   const requestHeaders = await headers();
   const userId = requestHeaders.get("oai-authenticated-user-id");
   const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
+  const encodedFullName = requestHeaders.get(
+    "oai-authenticated-user-full-name",
+  );
   const fullName =
     encodedFullName &&
     requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
@@ -140,6 +210,16 @@ When using the Sites plugin, follow its skill instructions for installation, bui
 The portable build runs Vinext directly without a host `timeout` command. The managed-linux build uses `scripts/build-verified.sh` and its existing `SITES_BUILD_TIMEOUT` setting.
 
 ## Learn More
+
+### Backend authentication
+
+Set `NEXT_PUBLIC_API_BASE_URL` to the backend origin. Authentication and protected requests send browser-managed HttpOnly cookies with `withCredentials: true`. Login and refresh return only status/message objects. The frontend never reads cookies, stores tokens, decodes JWTs, or generates Authorization headers. It removes known legacy token storage entries without clearing unrelated browser data.
+
+Deploy the frontend over HTTPS and align the backend's `PUBLIC_FRONTEND_BASE_URL`, credentialed CORS origin, and cookie Secure/SameSite settings with the exact frontend origin. Keep production cookies Secure. For local HTTP development only, set backend `AUTH_REFRESH_COOKIE_SECURE=false` and `PUBLIC_FRONTEND_BASE_URL` to the exact local frontend origin, including port. The browser supplies Origin automatically. Cross-origin cookies require compatible SameSite settings and credentialed CORS; expose `Retry-After` if the frontend should read it. Otherwise rate limits use a 60-second fallback.
+
+Successful login loads `GET /api/v1/auth/session` before navigating to a validated internal destination (default `/account`). Login and protected account startup check GET session, which does not renew cookies. Protected API calls must use `authenticatedApiClient` from `features/auth/api/session.ts`: concurrent 401s share one POST refresh, then each original request retries once. Public auth endpoints use the base client and are never recursively intercepted. Invalid sessions redirect protected pages to login; network/5xx failures expose an explicit retry. Logout revokes cookies before clearing session state and cached data, and stale in-flight responses cannot restore authentication.
+
+The account page handles empty memberships, multiple businesses, suspended businesses, and the backend's current OWNER/ADMIN/STAFF roles. It does not invent role permissions. Business selection lives in the session store and is reconciled against each session response. Use `tenantQueryKey(...)` for future tenant queries; it scopes keys by account and selected business. The session provider removes cached queries when the account or business changes. No business onboarding endpoint exists in this frontend yet.
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
 - [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)

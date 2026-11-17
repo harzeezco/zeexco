@@ -1,388 +1,274 @@
-Task 6.4B implementation is complete. Do NOT redesign or expand the feature.
+Implement the WhatsApp browser registration fallback for Zico, using the existing web registration, email activation, and cookie-based authentication flows.
 
-Your job is to perform final verification and reconcile the frontend against the actual Task 6.4A backend contract.
+Inspect the existing routing, registration form, verification page, API client, authentication state, and tests before changing anything. Follow the project’s architecture and reuse existing components. Implement the changes fully rather than only proposing a plan.
 
-## Development / E2E environment
+Goal
 
-The Zeexco backend currently runs locally in Docker.
+A merchant starts in WhatsApp, clicks Get started, registers in the browser with email and password, activates their email, then returns to the original WhatsApp conversation to continue onboarding.
 
-Backend API container/service:
+The browser must preserve the onboarding token and submit it with registration details. The backend derives the WhatsApp sender and provider from that token. The frontend must never supply or determine those identities.
 
-```text
-zeexco-api
-```
+1. Registration entry and token handling
 
-Backend application/container port:
+The WhatsApp Get started button opens:
 
-```text
-8080
-```
+/register?token=<opaque-onboarding-token>
 
-Local host API base URL:
+On the registration route:
 
-```text
-http://localhost:8080
-```
+- If token is present, enter WhatsApp browser registration mode.
+- If token is absent, retain the existing ordinary web registration flow.
+- Treat the token as opaque. Do not decode it, derive identity from it, or replace it.
+- Reject empty or repeated token query parameters rather than choosing one arbitrarily.
+- Validate a supplied token before enabling registration.
+- Keep the token available while the user completes the form and corrects validation errors.
+- Never put the token in analytics, error reports, console logs, WhatsApp messages, or third-party requests.
+- Do not store credentials or tokens in localStorage/sessionStorage.
+- Avoid third-party assets or analytics that could capture the token-bearing URL. Use a no-referrer policy for this journey where supported.
+- After registration succeeds, replace the token-bearing registration URL when navigating to the existing Check your email screen.
+- Do not automatically resubmit registration after a reload.
 
-The hosted frontend is:
+The token on /register is an ONBOARDING token.
+The token on the email verification route is a DIFFERENT, signed EMAIL-VERIFICATION token.
+Never interchange them.
 
-```text
-https://www.zeexco.com
-```
+2. Validate the onboarding token
 
-For real WhatsApp E2E testing, the hosted frontend cannot use localhost directly.
+GET /api/v1/whatsapp/onboarding/validate?token=<URL-encoded-token>
 
-We will expose:
+Successful response: HTTP 200
 
-```text
-http://localhost:8080
-```
-
-through a Cloudflare Quick Tunnel:
-
-```bash
-cloudflared tunnel --url http://localhost:8080
-```
-
-This produces a temporary HTTPS URL conceptually like:
-
-```text
-https://<random-name>.trycloudflare.com
-```
-
-The hosted frontend must use that HTTPS tunnel URL as:
-
-```env
-NEXT_PUBLIC_API_BASE_URL=https://<current-tunnel>.trycloudflare.com
-```
-
-Do NOT hardcode a specific Quick Tunnel hostname because Quick Tunnel URLs are ephemeral.
-
-Do NOT change the application to use `localhost:8080` from the production-hosted browser.
-
-The backend must allow the frontend origin:
-
-```text
-https://www.zeexco.com
-```
-
-through its existing CORS configuration.
-
-For local frontend development, the backend remains reachable directly at:
-
-```text
-http://localhost:8080
-```
-
----
-
-## 1. Verify the actual backend contract
-
-Inspect the Task 6.4A backend/OpenAPI implementation.
-
-Confirm exactly:
-
-- `GET /api/v1/whatsapp/onboarding/validate?token=...`
-- `POST /api/v1/whatsapp/onboarding/register`
-- `POST /api/v1/auth/register`
-
-Verify:
-
-- exact request bodies;
-- exact success response bodies;
-- HTTP status codes;
-- actual error response shape;
-- actual error-code field name;
-- actual error-code values;
-- behavior of `FIRST_PRODUCT_PENDING`;
-- whether web registration returns authentication/session information or requires subsequent login.
-
-Do not continue supporting guessed contracts if the backend proves otherwise.
-
-Update the frontend only where required to match the real backend.
-
----
-
-## 2. Confirm WhatsApp registration contract
-
-The intended contract is:
-
-```json
 {
-  "first_name": "Wakil",
-  "last_name": "Azeez",
-  "business_name": "Wakil Stores",
-  "onboarding_token": "<token>"
+"valid": true,
+"status": "PENDING",
+"expires_at": "<ISO timestamp>"
 }
-```
 
-or optionally:
+This means the registration form may be shown. It does not mean the user is registered, authenticated, or email-verified.
 
-```json
+Handle:
+
+- 400 ONBOARDING_TOKEN_REQUIRED: Missing, empty, or repeated parameter.
+- 400 ONBOARDING_TOKEN_INVALID: Malformed token.
+- 404 ONBOARDING_TOKEN_INVALID: Unknown token.
+- 410 ONBOARDING_TOKEN_EXPIRED: Explain that the user should return to WhatsApp and request a new Get started link.
+- 409 ONBOARDING_VERIFICATION_PENDING: Registration was already submitted. Show Check your email instead of another registration form.
+- 409 ONBOARDING_TOKEN_CONSUMED: The link was already used. Explain this and offer the existing login/manual return-to-WhatsApp guidance.
+- 429: Respect Retry-After where available.
+- Network/5xx: Show a recoverable error with a retry action; do not call the token expired or invalid without that response from the backend.
+
+Use explicit loading, valid, pending-verification, unavailable, and recoverable-error states. Do not briefly display an enabled form before validation finishes.
+
+3. Registration fields and validation
+
+Use the existing registration form with:
+
+- first_name
+- last_name
+- business_name
+- email — required
+- password — required
+
+Do not collect or submit:
+
+- provider
+- WhatsApp ID
+- sender phone number
+- Meta phone-number ID
+- user ID
+- business ID
+
+Password rules must match the backend:
+
+- At least 8 Unicode code points.
+- At most 72 UTF-8 bytes.
+- At least one Unicode letter, uppercase OR lowercase. Both cases are not required.
+- At least one Unicode decimal digit.
+- At least one Unicode punctuation or symbol character.
+- Spaces do not count as symbols.
+- Preserve the password exactly; never trim it.
+
+For JavaScript, use Unicode-aware validation equivalent to:
+
+- Array.from(password).length for the character minimum.
+- new TextEncoder().encode(password).length for the byte maximum.
+- \p{L}, \p{Nd}, and [\p{P}\p{S}] with the u flag for composition.
+
+Reuse existing password visibility and accessibility patterns. If there is a confirm-password field, validate it locally and do not send it to the backend.
+
+Display backend validation messages next to the relevant fields. Never include passwords in logging or persisted form state.
+
+4. Submit registration
+
+Prefer the shared endpoint:
+
+POST /api/v1/auth/register
+Content-Type: application/json
+
+WhatsApp-originated request:
+
 {
-  "first_name": "Wakil",
-  "last_name": "Azeez",
-  "business_name": "Wakil Stores",
-  "email": "optional@example.com",
-  "onboarding_token": "<token>"
+"first_name": "Ada",
+"last_name": "Lovelace",
+"business_name": "Ada Store",
+"email": "ada@example.com",
+"password": "Securepass1!",
+"onboarding_token": "<token from Get started link>"
 }
-```
 
-Verify that the frontend:
+Ordinary web registration sends the same account fields but OMITS onboarding_token.
 
-- never sends password;
-- never sends confirm_password;
-- omits empty email;
-- sends the onboarding token;
-- does not send WhatsApp number;
-- does not send provider identity;
-- does not send User ID;
-- does not send Business ID.
+The dedicated endpoint also supports WhatsApp browser signup:
 
----
+POST /api/v1/whatsapp/onboarding/register
 
-## 3. Confirm Web registration contract
+It accepts the same fields and REQUIRES onboarding_token. If the project already uses this endpoint for WhatsApp mode, it may continue doing so. Use one endpoint per submission, never both.
 
-Verify `/register` sends:
+Success: HTTP 202
 
-```json
 {
-  "first_name": "Wakil",
-  "last_name": "Azeez",
-  "business_name": "Wakil Stores",
-  "email": "wakil@example.com",
-  "password": "..."
+"status_code": 202,
+"message": "Registration successful. Please check your email to activate your account."
 }
-```
 
-`confirmPassword` is frontend validation only and must NOT be sent to the backend.
+On success:
 
-No onboarding token should be sent.
+- Show Check your email using the existing UI.
+- Do not expect user, business, next_step, or tokens in this response.
+- Do not mark the user authenticated.
+- Do not redirect to the platform dashboard.
+- Do not redirect to WhatsApp before email activation succeeds.
+- Clear the password from form state.
+- Disable duplicate submissions while the request is in flight.
 
----
+The backend creates a PENDING account and reserves the onboarding session as EMAIL_VERIFICATION_PENDING. WhatsApp identity linking happens after activation.
 
-## 4. Verify API base URL behavior
+Registration error handling:
 
-Inspect `lib/api-client.ts`.
+- VALIDATION_ERROR: Show the field-specific backend message.
+- EMAIL_ALREADY_REGISTERED: Offer login guidance. Do not silently merge accounts or claim WhatsApp was linked.
+- ONBOARDING_TOKEN_INVALID: Show an invalid-link state.
+- ONBOARDING_TOKEN_EXPIRED: Ask the user to restart from WhatsApp.
+- ONBOARDING_TOKEN_CONSUMED: Do not retry registration automatically.
+- 429/network/5xx: Handle as recoverable without duplicate submissions or misleading success.
 
-Confirm:
+Authenticated linking of an already-existing account is separate backend work. Do not implement a frontend-only workaround based on matching email or phone number.
 
-```text
-NEXT_PUBLIC_API_BASE_URL
-```
+5. Email activation
 
-is used as the Axios base URL when configured.
+Keep the existing email verification route and extract its signed verification token.
 
-The code must work with:
+Submit:
 
-```env
-NEXT_PUBLIC_API_BASE_URL=https://<cloudflare-quick-tunnel>.trycloudflare.com
-```
+POST /api/v1/auth/verify-email
+Content-Type: application/json
 
-Do not append `/api` automatically unless that matches the actual backend route structure.
+{
+"token": "<signed-email-verification-token>"
+}
 
-For example, given:
+Do not send the original onboarding token, provider, phone number, or a browser-supplied redirect URL.
 
-```env
-NEXT_PUBLIC_API_BASE_URL=https://example.trycloudflare.com
-```
+Support BOTH successful activation contracts:
 
-WhatsApp validation should resolve to:
+A. Ordinary web registration:
+HTTP 204, no response body.
 
-```text
-https://example.trycloudflare.com/api/v1/whatsapp/onboarding/validate?token=...
-```
+Do not attempt response.json() on a 204 response.
+Show the existing successful activation state and login action.
 
-and WhatsApp registration to:
+B. WhatsApp browser registration:
+HTTP 200
 
-```text
-https://example.trycloudflare.com/api/v1/whatsapp/onboarding/register
-```
+{
+"status_code": 200,
+"message": "Account activated successfully. Continue in WhatsApp.",
+"next_step": "CONTINUE_IN_WHATSAPP",
+"redirect_url": "https://wa.me/15551892941?text=Continue"
+}
 
-Do not expose or log the onboarding token.
+For CONTINUE_IN_WHATSAPP:
 
----
+- Show an activation success state.
+- Make Continue in WhatsApp the primary action.
+- Use the redirect_url returned by the backend.
+- Explain: “Open WhatsApp, then tap Send to continue.”
+- Prefer a user-clicked link/button instead of immediately opening an app or popup.
+- Do not hardcode the test number in frontend application logic.
+- Do not construct a destination from browser query parameters or user-entered phone numbers.
+- Accept only a valid HTTPS wa.me destination without URL credentials. Treat an unexpected destination as unavailable.
+- redirect_url is optional when the backend has no public return number configured. In that case, show clear instructions to return to the existing WhatsApp chat manually.
+- An optional secondary login action may use the existing web login route.
+- Do not mark browser authentication successful merely because email activation succeeded.
 
-## 5. CORS reconciliation
+The wa.me link opens the chat and prefills Continue. It does NOT send the message automatically. The user must tap Send. That inbound message lets the backend recognize the linked WhatsApp identity and send the deterministic Create first product invitation.
 
-Confirm the backend CORS configuration permits requests originating from:
+The frontend should not call WhatsApp Cloud API, send a WhatsApp message itself, or simulate successful product creation.
 
-```text
-https://www.zeexco.com
-```
+Activation errors:
 
-Do not solve CORS by allowing every origin globally unless the existing development policy explicitly requires that.
+- 400 EMAIL_VERIFICATION_INVALID: Invalid verification link.
+- 410 EMAIL_VERIFICATION_EXPIRED: Explain expiry and provide the existing recovery/login guidance.
+- 409 EMAIL_VERIFICATION_CONSUMED: Show an already-used-link state; do not blindly repeat activation or assume an authenticated session.
+- Network/5xx: Show a recoverable error and retry action.
 
-The target E2E path is:
+Prevent duplicate activation requests caused by React Strict Mode, repeated effects, or multiple renders. Do not disable Strict Mode to solve this.
 
-```text
-www.zeexco.com
-        ↓
-Cloudflare HTTPS tunnel
-        ↓
-localhost:8080
-        ↓
-zeexco-api
-```
+6. Preserve cookie-based browser authentication
 
----
+Keep the existing backend session contract:
 
-## 6. Run automated tests
+- Login and refresh return only status_code and message.
+- The backend stores access and refresh credentials in HttpOnly cookies.
+- Use fetch credentials: "include" or Axios withCredentials: true.
+- Never read HttpOnly cookies, manually decode browser JWTs, or restore frontend token storage.
+- After actual login, use GET /api/v1/auth/session to initialize user and business authorization context.
+- Preserve the existing single-flight refresh and logout handling.
+- Registration and activation do not automatically establish a browser session.
 
-Run the complete relevant Vitest suite.
+The browser supplies Origin automatically. Do not attempt to set that header from frontend JavaScript. Backend PUBLIC_FRONTEND_BASE_URL must exactly match the frontend origin.
 
-The previous run found DOM cleanup leakage and cleanup was added.
+7. Backend configuration reference
 
-Verify the fix with a fresh final run.
+The development WhatsApp test account is +1 (555) 189-2941.
 
-Do not report PASS unless the final run actually passes.
+The backend configuration is:
 
----
+WHATSAPP_ONBOARDING_RETURN_URL=https://wa.me/15551892941
 
-## 7. TypeScript
+This is the public phone number, not Meta’s phone-number ID. The backend adds the prefilled Continue text.
 
-Run the TypeScript typecheck after all current Task 6.4 changes.
+Keep this configuration on the backend. The frontend consumes redirect_url.
 
-Report the exact result.
+Native WhatsApp Flow signup is separate and awaiting publication. Do not replace the browser fallback with native Flow logic or change the backend’s provider/identity rules.
 
----
+8. Tests and verification
 
-## 8. Lint
+Add focused tests covering:
 
-Run the normal lint command.
+- Ordinary registration with no onboarding token.
+- WhatsApp registration with a valid token.
+- Missing/empty/repeated/invalid/expired/consumed tokens.
+- ONBOARDING_VERIFICATION_PENDING showing Check your email.
+- Form submission preserving the exact token.
+- Required email/password and Unicode password boundaries.
+- Passwords and tokens excluded from logs and persisted state.
+- Registration 202 containing only status/message.
+- Duplicate-submit prevention.
+- Ordinary activation 204 without JSON parsing.
+- WhatsApp activation 200 rendering the returned Continue link.
+- Missing or unsafe redirect_url handling.
+- Activation errors and duplicate-effect protection.
+- No authenticated frontend state before actual login.
+- Existing login, session restoration, refresh, and logout behavior.
 
-Fix Task 6.4-related failures.
+Run relevant tests, type checking, linting, and the production build using the project’s scripts. Inspect the registration, Check your email, and activation success states at mobile and desktop widths.
 
-Report the final result.
+Deliver the completed implementation with:
 
----
+- Changed files and resulting behavior.
+- Tests and build results.
+- Any required environment configuration.
+- Any remaining backend dependency or live-test limitation.
 
-## 9. Production build
-
-Run the normal Next.js production build.
-
-Verify:
-
-- `/register` builds;
-- `/whatsapp/register` builds;
-- App Router/Suspense requirements;
-- environment handling;
-- React Query integration.
-
-Report the final result.
-
----
-
-## 10. Security regression
-
-Confirm:
-
-- onboarding token is not rendered;
-- onboarding token is not logged;
-- onboarding token is not stored in localStorage;
-- onboarding token is not stored in sessionStorage;
-- onboarding token is not directly included in React Query query keys;
-- WhatsApp registration contains no password;
-- Web registration does not send onboarding tokens;
-- WhatsApp registration does not trust client-supplied WhatsApp identity.
-
----
-
-## 11. Route regression
-
-Confirm:
-
-```text
-/register
-→ Web registration
-```
-
-```text
-/whatsapp/register?token=...
-→ WhatsApp registration
-```
-
-and legacy:
-
-```text
-/register?token=...
-```
-
-redirects to the canonical WhatsApp route while preserving the token.
-
-There should be only one permanent WhatsApp registration implementation.
-
----
-
-## 12. Missing-token behavior
-
-Verify:
-
-```text
-/whatsapp/register
-```
-
-without a token shows the intended invalid-link state and does NOT display the registration form.
-
----
-
-## 13. Visual smoke check
-
-If browser tooling is available, perform a mobile-width smoke check of:
-
-- `/register`;
-- `/whatsapp/register` missing-token state;
-- valid-token WhatsApp registration if a safe development token exists.
-
-If no valid token exists, state this clearly.
-
----
-
-## 14. Do not expand scope
-
-Do NOT implement:
-
-- Products;
-- WhatsApp passwordless login;
-- Payments;
-- KYC;
-- account merging;
-- Redux;
-- staff management;
-- new authentication architecture.
-
----
-
-## 15. Final report
-
-Return:
-
-1. Backend contract inspected.
-2. Validation endpoint exact response.
-3. WhatsApp registration exact success response.
-4. Web registration exact success response.
-5. Actual backend error shape.
-6. Actual error-code field.
-7. Error codes reconciled.
-8. `FIRST_PRODUCT_PENDING` behavior.
-9. Web post-registration behavior.
-10. WhatsApp payload.
-11. Web payload.
-12. Axios base URL behavior.
-13. Local backend URL confirmed.
-14. Container/API port confirmed.
-15. Cloudflare tunnel compatibility confirmed.
-16. CORS compatibility confirmed.
-17. Vitest command/result.
-18. Tests passed/failed.
-19. Typecheck command/result.
-20. Lint command/result.
-21. Production-build command/result.
-22. Security regression result.
-23. Route regression result.
-24. Missing-token result.
-25. Visual smoke-check result.
-26. Files changed.
-27. Remaining blockers before real WhatsApp E2E.
-
-Do not start another feature.
+Use the backend guide docs/flows/whatsapp-browser-registration.md and OpenAPI contract as references when available. Do not modify unrelated features.

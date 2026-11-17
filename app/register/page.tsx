@@ -1,9 +1,22 @@
-import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import { WebRegistrationForm } from "@/features/auth/components/web-registration-form";
+import { WhatsAppRegistrationFlow } from "@/features/auth/components/whatsapp-registration-flow";
+import { singleOpaqueToken } from "@/features/auth/opaque-token";
 
-export default async function RegisterPage({ searchParams }: { searchParams: Promise<{ token?: string | string[] }> }) {
+export const metadata: Metadata = {
+  referrer: "no-referrer",
+  robots: { index: false, follow: false },
+};
+
+export default async function RegisterPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ token?: string | string[] }>;
+}) {
   const params = await searchParams;
-  const token = Array.isArray(params.token) ? params.token[0] : params.token;
-  if (token) redirect(`/whatsapp/register?token=${encodeURIComponent(token)}`);
+  if (params.token !== undefined) {
+    const token = singleOpaqueToken(params.token);
+    return <WhatsAppRegistrationFlow key={token || "invalid"} token={token} />;
+  }
   return <WebRegistrationForm />;
 }
