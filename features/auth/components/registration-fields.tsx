@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import type { RegistrationFormData } from "../schemas/registration";
 import { RegistrationField } from "./registration-field";
@@ -12,7 +11,6 @@ export function RegistrationFields({
   form: UseFormReturn<RegistrationFormData>;
   pending: boolean;
 }) {
-  const [showPassword, setShowPassword] = useState(false);
   return (
     <fieldset
       disabled={pending}
@@ -46,40 +44,13 @@ export function RegistrationFields({
       />
       <RegistrationField
         id="email"
-        label="Email address"
+        label="Email address (optional)"
         placeholder="you@example.com"
         type="email"
         inputMode="email"
         autoComplete="email"
         {...form.register("email")}
         error={form.formState.errors.email?.message}
-      />
-      <RegistrationField
-        id="password"
-        label="Password"
-        placeholder="Create a password"
-        type={showPassword ? "text" : "password"}
-        autoComplete="new-password"
-        {...form.register("password", {
-          onChange: () => {
-            void form.trigger("password");
-          },
-        })}
-        error={form.formState.errors.password?.message}
-        helperText="Use at least 8 characters, including a letter, a number and a symbol."
-        trailing={
-          <button
-            type="button"
-            onClick={() => setShowPassword((visible) => !visible)}
-            aria-label={showPassword ? "Hide password" : "Show password"}
-            aria-pressed={showPassword}
-            className="inline-flex h-9 items-center gap-1 rounded bg-transparent px-2 text-xs font-semibold text-[#1f5bd8] hover:bg-[#eef4ff]"
-          >
-            <span className="password-toggle-text">
-              {showPassword ? "Hide" : "Show"}
-            </span>
-          </button>
-        }
       />
     </fieldset>
   );

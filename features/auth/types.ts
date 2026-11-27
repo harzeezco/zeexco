@@ -13,8 +13,9 @@ export interface BusinessSummary {
 }
 
 export interface RegistrationResponse {
-  status_code: 202;
-  message: string;
+  user: UserSummary;
+  business: BusinessSummary;
+  next_step: "ADD_FIRST_PRODUCT";
 }
 
 export interface EmailVerificationRequest {

@@ -291,6 +291,14 @@ export function loadSession(): Promise<SessionResponse> {
   return request;
 }
 
+// Cookies were replaced by registration; invalidate any older session read.
+export function prepareRegistrationSession() {
+  generation++;
+  cookieVersion++;
+  sessionPromise = null;
+  retryAt = 0;
+}
+
 export function restoreSession() {
   if (!restorePromise) {
     removeLegacyTokens();

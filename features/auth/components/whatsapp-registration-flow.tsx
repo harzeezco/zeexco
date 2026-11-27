@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useValidateWhatsAppOnboarding } from "../api/whatsapp-onboarding";
 import { useRetryAfter } from "../use-retry-after";
 import { WebRegistrationLayout } from "./web-registration-layout";
@@ -7,6 +8,18 @@ import { WhatsAppRegistrationForm } from "./whatsapp-registration-form";
 import { OnboardingFeedback } from "./onboarding-feedback";
 
 export function WhatsAppRegistrationFlow({ token }: { token: string | null }) {
+  useEffect(() => {
+    // Keep the invitation only in component memory, away from referrers/analytics.
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("token")) {
+      url.searchParams.delete("token");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        url.pathname + url.search + url.hash,
+      );
+    }
+  }, []);
   const validation = useValidateWhatsAppOnboarding(token);
   const seconds = useRetryAfter(validation.error, validation.errorUpdatedAt);
   if (!token)

@@ -1,87 +1,51 @@
 import { describe, expect, it } from "vitest";
-import {
-  passwordSchema,
-  webRegistrationSchema,
-  whatsappRegistrationSchema,
-} from "./registration";
-
-describe("registration schemas", () => {
-  it("requires a web password with at least eight characters", () => {
-    const base = {
-      first_name: "Wakil",
-      last_name: "Azeez",
-      business_name: "Stores",
-      email: "wakil@example.com",
-    };
+import { webRegistrationSchema as schema } from "./registration";
+const base = {
+  first_name: "Ada",
+  last_name: "Obi",
+  business_name: "Stores",
+  email: "",
+};
+describe("merchant profile validation", () => {
+  it("allows blank email and normalizes names and email", () => {
     expect(
-      webRegistrationSchema.safeParse({ ...base, password: "short" }).success,
-    ).toBe(false);
-    expect(
-      webRegistrationSchema.safeParse({ ...base, password: "password1!" })
-        .success,
-    ).toBe(true);
+      schema.parse({
+        ...base,
+        first_name: "  Ada   Maria  ",
+        email: " ADA@EXAMPLE.COM ",
+      }),
+    ).toEqual({ ...base, first_name: "Ada Maria", email: "ada@example.com" });
+    expect(schema.safeParse(base).success).toBe(true);
   });
-
-  it.each([
-    ["", "Password is required"],
-    ["Ab1!", "Password must be at least 8 characters"],
-    ["1234567!", "Password must contain at least one letter"],
-    ["password!", "Password must contain at least one number"],
-    ["password1", "Password must contain at least one symbol"],
-    ["password1 ", "Password must contain at least one symbol"],
-  ])("explains the missing requirement for %s", (password, message) => {
-    const result = passwordSchema.safeParse(password);
-    expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.issues[0].message).toBe(message);
-  });
-
-  it.each(["password1!", "PASSWORD1!", "Abcdef1!"])(
-    "accepts either letter case: %s",
-    (password) => {
-      expect(passwordSchema.safeParse(password).success).toBe(true);
+  it.each(["first_name", "last_name", "business_name"])(
+    "requires %s",
+    (field) => {
+      expect(schema.safeParse({ ...base, [field]: "  " }).success).toBe(false);
     },
   );
-
-  it("requires email and password for WhatsApp browser registration", () => {
-    const base = {
-      first_name: "Wakil",
-      last_name: "Azeez",
-      business_name: "Stores",
-      password: "Password1!",
-    };
+  it("counts Unicode code points and enforces name limits", () => {
     expect(
-      whatsappRegistrationSchema.safeParse({ ...base, email: "" }).success,
-    ).toBe(false);
-    expect(
-      whatsappRegistrationSchema.safeParse({ ...base, email: "not-email" })
-        .success,
-    ).toBe(false);
-    expect(
-      whatsappRegistrationSchema.safeParse({
+      schema.safeParse({
         ...base,
-        email: "ada@example.com",
-        password: "",
-      }).success,
-    ).toBe(false);
-    expect(
-      whatsappRegistrationSchema.safeParse({
-        ...base,
-        email: "ada@example.com",
+        first_name: "😀".repeat(100),
+        business_name: "a".repeat(200),
       }).success,
     ).toBe(true);
+    expect(
+      schema.safeParse({ ...base, first_name: "a".repeat(101) }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({ ...base, last_name: "a".repeat(101) }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({ ...base, business_name: "a".repeat(201) }).success,
+    ).toBe(false);
   });
-
-  it("counts Unicode characters and UTF-8 bytes and preserves the exact password", () => {
-    expect(passwordSchema.parse("  élève١! ")).toBe("  élève١! ");
-    expect(passwordSchema.safeParse("😀😀😀😀😀a1!").success).toBe(true);
-    expect(passwordSchema.safeParse("😀😀a1!").success).toBe(false);
-    expect(passwordSchema.safeParse("é".repeat(34) + "a1!x").success).toBe(
-      true,
-    );
-    expect(passwordSchema.safeParse("é".repeat(35) + "a1!").success).toBe(
-      false,
-    );
-    expect(passwordSchema.safeParse("letters١! ").success).toBe(true);
-    expect(passwordSchema.safeParse("letters1\u0301").success).toBe(false);
+  it("rejects invalid emails and emails over 255 UTF-8 bytes", () => {
+    expect(schema.safeParse({ ...base, email: "invalid" }).success).toBe(false);
+    expect(
+      schema.safeParse({ ...base, email: "é".repeat(123) + "@example.com" })
+        .success,
+    ).toBe(false);
   });
 });

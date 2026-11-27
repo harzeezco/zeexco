@@ -19,22 +19,25 @@ describe("WhatsApp onboarding API", () => {
     );
   });
 
-  it("uses only the dedicated registration endpoint and accepts status/message", async () => {
-    const data = { status_code: 202, message: "Check your email" };
+  it("uses the shared registration endpoint", async () => {
+    const data = {
+      user: { id: "u" },
+      business: { id: "b" },
+      next_step: "ADD_FIRST_PRODUCT",
+    };
     const post = vi
       .spyOn(apiClient, "post")
-      .mockResolvedValue({ status: 202, data });
+      .mockResolvedValue({ status: 201, data });
     const payload = {
       first_name: "Ada",
       last_name: "Lovelace",
       business_name: "Ada Store",
       email: "ada@example.com",
-      password: " Securepass1! ",
       onboarding_token: "opaque",
     };
     expect(await registerWhatsAppMerchant(payload)).toEqual(data);
     expect(post).toHaveBeenCalledExactlyOnceWith(
-      "/api/v1/whatsapp/onboarding/register",
+      "/api/v1/auth/register",
       payload,
     );
   });
