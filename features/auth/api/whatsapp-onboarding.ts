@@ -1,16 +1,14 @@
 import { useId } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiClient, normalizeApiError } from "@/lib/api-client";
-import type { RegistrationResponse } from "../types";
+import {
+  registerWebMerchant,
+  type WebRegistrationRequest,
+} from "./registration";
 
-export interface WhatsAppRegistrationRequest {
-  first_name: string;
-  last_name: string;
-  business_name: string;
-  email: string;
-  password: string;
+export type WhatsAppRegistrationRequest = WebRegistrationRequest & {
   onboarding_token: string;
-}
+};
 
 export interface OnboardingValidationResponse {
   valid: boolean;
@@ -33,11 +31,7 @@ export async function validateWhatsAppOnboarding(token: string) {
 export async function registerWhatsAppMerchant(
   payload: WhatsAppRegistrationRequest,
 ) {
-  const { data } = await apiClient.post<RegistrationResponse>(
-    "/api/v1/whatsapp/onboarding/register",
-    payload,
-  );
-  return data;
+  return registerWebMerchant(payload);
 }
 
 export function useValidateWhatsAppOnboarding(token: string | null) {

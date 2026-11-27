@@ -1,367 +1,317 @@
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AxiosError, type AxiosResponse } from "axios";
-import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "@/lib/api-client";
 import { QueryProvider } from "@/lib/query-client";
 import { WhatsAppRegistrationFlow } from "./whatsapp-registration-flow";
 import { WebRegistrationForm } from "./web-registration-form";
 import {
-  RegistrationSuccess,
-  saveRegistrationConfirmation,
-} from "./registration-success";
-import { sessionStore } from "../api/session";
-
+  authenticatedApiClient,
+  clearSession,
+  sessionStore,
+} from "../api/session";
 const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => navigation }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-const renderFlow = (token: string | null) =>
-  render(
-    <StrictMode>
-      <WhatsAppRegistrationFlow token={token} />
-    </StrictMode>,
-    { wrapper: QueryProvider },
-  );
-function error(status: number, code: string, field?: string, headers = {}) {
+function failure(code: string, status = 400, headers = {}) {
   return new AxiosError("Request failed", undefined, undefined, undefined, {
     status,
     headers,
-    data: { error: { code, message: "Backend validation message", field } },
+    data: { error: { code, message: "Backend message" } },
   } as AxiosResponse);
 }
-async function fill() {
-  const user = userEvent.setup();
+const session = {
+  user: { id: "user", first_name: "Ada", last_name: "Obi", status: "ACTIVE" },
+  businesses: [
+    {
+      id: "business",
+      name: "Stores",
+      status: "ACTIVE",
+      membership_role: "OWNER",
+    },
+  ],
+};
+const registered = {
+  user: session.user,
+  business: session.businesses[0],
+  next_step: "ADD_FIRST_PRODUCT",
+};
+const challenge = (id = "challenge", expiry = Date.now() + 300000) => ({
+  challenge_id: id,
+  expires_at: new Date(expiry).toISOString(),
+  message: "Requested",
+});
+async function profile(email = "") {
   await screen.findByLabelText("First name");
   for (const [label, value] of [
-    ["First name", "Ada"],
-    ["Last name", "Lovelace"],
-    ["Business name", "Ada Store"],
-    ["Email address", "ada@example.com"],
-    ["Password", " Securepass1! "],
-  ]) {
-    await user.click(screen.getByLabelText(label));
-    await user.paste(value);
-  }
+    ["First name", "  Ada  "],
+    ["Last name", "Obi"],
+    ["Business name", "Stores"],
+    ["Email address (optional)", email],
+  ])
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
+async function number() {
+  fireEvent.change(screen.getByLabelText("WhatsApp number"), {
+    target: { value: "+2348012345678" },
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Request code" }));
+  await screen.findByLabelText("Verification code");
+}
+async function verify() {
+  const user = userEvent.setup();
+  await user.click(screen.getByLabelText("Verification code"));
+  await user.paste("012345");
+  await user.keyboard("{Enter}");
+  await screen.findByLabelText("First name");
+}
+const invite = (token: string | null = "invitation") =>
+  render(<WhatsAppRegistrationFlow token={token} />, {
+    wrapper: QueryProvider,
+  });
 beforeEach(() => {
   vi.restoreAllMocks();
   navigation.replace.mockReset();
+  clearSession();
   sessionStorage.clear();
   localStorage.clear();
+  vi.spyOn(authenticatedApiClient, "get").mockResolvedValue({ data: session });
+  vi.spyOn(apiClient, "get").mockResolvedValue({
+    data: { valid: true, status: "PENDING" },
+  });
 });
-afterEach(cleanup);
-
-describe("WhatsApp browser signup", () => {
-  it("does not enable or render the form until token validation succeeds", async () => {
-    let finish!: (value: unknown) => void;
-    const get = vi.spyOn(apiClient, "get").mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    );
-    renderFlow("opaque/+?&=token");
-    expect(screen.getByRole("status")).toHaveTextContent("Please wait");
-    expect(
-      screen.queryByRole("button", { name: "Create account" }),
-    ).not.toBeInTheDocument();
-    await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
-    expect(get).toHaveBeenCalledWith("/api/v1/whatsapp/onboarding/validate", {
-      params: { token: "opaque/+?&=token" },
-    });
-    await act(async () => finish({ data: { valid: true, status: "PENDING" } }));
-    expect(
-      await screen.findByRole("button", { name: "Create account" }),
-    ).toBeEnabled();
-  });
-
-  it("rejects a missing token without a validation request", () => {
-    const get = vi.spyOn(apiClient, "get");
-    renderFlow(null);
-    expect(
-      screen.getByRole("heading", { name: "Invalid registration link" }),
-    ).toBeInTheDocument();
-    expect(get).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    [400, "ONBOARDING_TOKEN_REQUIRED", "Invalid registration link"],
-    [400, "ONBOARDING_TOKEN_INVALID", "Invalid registration link"],
-    [404, "ONBOARDING_TOKEN_INVALID", "Invalid registration link"],
-    [410, "ONBOARDING_TOKEN_EXPIRED", "This link has expired"],
-    [409, "ONBOARDING_TOKEN_CONSUMED", "This link has already been used"],
-    [409, "ONBOARDING_VERIFICATION_PENDING", "Check your email"],
-  ])(
-    "handles validation %s %s without showing a form",
-    async (status, code, heading) => {
-      vi.spyOn(apiClient, "get").mockRejectedValue(
-        error(status as number, code as string),
-      );
-      const post = vi.spyOn(apiClient, "post");
-      renderFlow("opaque");
-      expect(
-        await screen.findByRole("heading", { name: heading as string }),
-      ).toBeInTheDocument();
-      expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
-      expect(post).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each([new AxiosError("Network Error"), error(500, "LOOKUP_FAILED")])(
-    "allows an explicit retry for recoverable validation failures",
-    async (failure) => {
-      const get = vi
-        .spyOn(apiClient, "get")
-        .mockRejectedValueOnce(failure)
-        .mockResolvedValueOnce({ data: { valid: true, status: "PENDING" } });
-      renderFlow("opaque");
-      await userEvent.click(
-        await screen.findByRole("button", { name: "Try again" }),
-      );
-      expect(await screen.findByLabelText("Password")).toBeInTheDocument();
-      expect(get).toHaveBeenCalledTimes(2);
-    },
-  );
-
-  it("respects Retry-After without automatically retrying validation", async () => {
-    const get = vi
-      .spyOn(apiClient, "get")
-      .mockRejectedValue(
-        error(429, "RATE_LIMITED", undefined, { "retry-after": "30" }),
-      );
-    renderFlow("opaque");
-    expect(
-      await screen.findByText("Try again in 30 seconds."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Try again" })).toBeDisabled();
-    expect(get).toHaveBeenCalledTimes(1);
-  });
-
-  it("submits one dedicated WhatsApp request with the exact token and password and stores no secrets", async () => {
-    vi.spyOn(apiClient, "get").mockResolvedValue({
-      data: { valid: true, status: "PENDING" },
-    });
-    let finish!: (value: unknown) => void;
-    const post = vi.spyOn(apiClient, "post").mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    );
-    const log = vi.spyOn(console, "log");
-    const initialSession = sessionStore.getSnapshot();
-    renderFlow(" opaque-token/+?= ");
-    await fill();
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+describe("registration journeys", () => {
+  it("verifies a pasted leading-zero OTP, creates a profile without email, and loads real memberships", async () => {
+    const post = vi
+      .spyOn(apiClient, "post")
+      .mockResolvedValueOnce({ data: challenge() })
+      .mockResolvedValueOnce({
+        data: { registration_challenge_token: "proof" },
+      })
+      .mockResolvedValueOnce({ status: 201, data: registered });
+    render(<WebRegistrationForm />, { wrapper: QueryProvider });
+    await number();
+    await verify();
+    expect(sessionStore.getSnapshot().status).toBe("anonymous");
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+    await profile();
     await userEvent.dblClick(
       screen.getByRole("button", { name: "Create account" }),
     );
-    expect(post).toHaveBeenCalledExactlyOnceWith(
-      "/api/v1/whatsapp/onboarding/register",
-      {
-        first_name: "Ada",
-        last_name: "Lovelace",
-        business_name: "Ada Store",
-        email: "ada@example.com",
-        password: " Securepass1! ",
-        onboarding_token: " opaque-token/+?= ",
-      },
+    await waitFor(() =>
+      expect(navigation.replace).toHaveBeenCalledWith("/account"),
     );
-    expect(
-      screen.getByRole("button", { name: "Creating account..." }),
-    ).toBeDisabled();
-    await act(async () =>
-      finish({
-        status: 202,
-        data: {
-          status_code: 202,
-          message: "Check your email to activate your account.",
-        },
-      }),
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/auth/whatsapp-otp/verify",
+      { challenge_id: "challenge", otp: "012345" },
     );
-    expect(
-      await screen.findByRole("heading", { name: "Check your email" }),
-    ).toBeInTheDocument();
-    expect(navigation.replace).toHaveBeenCalledWith("/register/success");
-    const saved = sessionStorage.getItem("zico-registration-confirmation")!;
-    expect(saved).not.toContain("opaque-token");
-    expect(saved).not.toContain("Securepass1!");
-    expect(saved).not.toContain("onboarding_token");
-    expect(localStorage.length).toBe(0);
-    expect(log).not.toHaveBeenCalled();
-    expect(sessionStore.getSnapshot()).toBe(initialSession);
-    expect(
-      screen.queryByRole("link", { name: "Continue in WhatsApp" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("preserves the token while correcting field errors", async () => {
-    vi.spyOn(apiClient, "get").mockResolvedValue({
-      data: { valid: true, status: "PENDING" },
+    expect(post).toHaveBeenNthCalledWith(3, "/api/v1/auth/register", {
+      first_name: "Ada",
+      last_name: "Obi",
+      business_name: "Stores",
+      registration_challenge_token: "proof",
     });
+    expect(post).toHaveBeenCalledTimes(3);
+    expect(
+      sessionStore.getSnapshot().session?.businesses[0].membership_role,
+    ).toBe("OWNER");
+    expect(localStorage.length + sessionStorage.length).toBe(0);
+  });
+  it("validates an invitation, strips its URL, and submits exactly the invitation proof", async () => {
+    window.history.replaceState({}, "", "/register?token=invitation");
     const post = vi
       .spyOn(apiClient, "post")
-      .mockRejectedValueOnce(error(400, "VALIDATION_ERROR", "business_name"))
-      .mockResolvedValueOnce({
-        status: 202,
-        data: { status_code: 202, message: "Check email" },
-      });
-    renderFlow("unchanged-token");
-    await fill();
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create account" }),
-    );
-    expect(
-      (await screen.findAllByText("Backend validation message")).length,
-    ).toBeGreaterThan(0);
-    await userEvent.type(screen.getByLabelText("Business name"), " Updated");
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create account" }),
-    );
-    await screen.findByRole("heading", { name: "Check your email" });
-    expect(post.mock.calls[1][1]).toMatchObject({
-      onboarding_token: "unchanged-token",
-      password: " Securepass1! ",
-    });
-  });
-
-  it.each([
-    "ONBOARDING_TOKEN_INVALID",
-    "ONBOARDING_TOKEN_EXPIRED",
-    "ONBOARDING_TOKEN_CONSUMED",
-  ])("stops registration after %s", async (code) => {
-    vi.spyOn(apiClient, "get").mockResolvedValue({
-      data: { valid: true, status: "PENDING" },
-    });
-    const post = vi
-      .spyOn(apiClient, "post")
-      .mockRejectedValue(error(409, code));
-    renderFlow("opaque");
-    await fill();
+      .mockResolvedValue({ status: 201, data: registered });
+    invite();
+    await profile(" ADA@EXAMPLE.COM ");
+    expect(window.location.search).toBe("");
     await userEvent.click(
       screen.getByRole("button", { name: "Create account" }),
     );
     await waitFor(() =>
-      expect(screen.queryByLabelText("Password")).not.toBeInTheDocument(),
+      expect(navigation.replace).toHaveBeenCalledWith("/account"),
     );
-    expect(post).toHaveBeenCalledTimes(1);
-    expect(
-      screen.queryByRole("button", { name: "Try again" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("offers login guidance without linking an existing account", async () => {
-    vi.spyOn(apiClient, "get").mockResolvedValue({
-      data: { valid: true, status: "PENDING" },
-    });
-    const post = vi
-      .spyOn(apiClient, "post")
-      .mockRejectedValue(error(409, "EMAIL_ALREADY_REGISTERED"));
-    renderFlow("opaque");
-    await fill();
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create account" }),
+    expect(apiClient.get).toHaveBeenCalledWith(
+      "/api/v1/whatsapp/onboarding/validate",
+      { params: { token: "invitation" } },
     );
-    expect(
-      await screen.findByText(/requires a separate linking flow/),
-    ).toBeInTheDocument();
-    expect(post).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps ordinary registration free of onboarding identity fields", async () => {
-    const post = vi.spyOn(apiClient, "post").mockResolvedValue({
-      status: 202,
-      data: { status_code: 202, message: "Check email" },
-    });
-    render(<WebRegistrationForm />, { wrapper: QueryProvider });
-    await fill();
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create account" }),
-    );
-    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
-    expect(Object.keys(post.mock.calls[0][1] as object)).toEqual([
-      "first_name",
-      "last_name",
-      "business_name",
-      "email",
-      "password",
-    ]);
-  });
-
-  it("persists only confirmation fields and never resubmits from Check your email", () => {
-    const post = vi.spyOn(apiClient, "post");
-    saveRegistrationConfirmation({
+    expect(post).toHaveBeenCalledExactlyOnceWith("/api/v1/auth/register", {
+      first_name: "Ada",
+      last_name: "Obi",
+      business_name: "Stores",
       email: "ada@example.com",
-      message: "Check email",
-      whatsapp: true,
-      password: "secret",
-      onboarding_token: "secret-token",
-    } as Parameters<typeof saveRegistrationConfirmation>[0]);
-    render(<RegistrationSuccess />);
-    expect(
-      JSON.parse(sessionStorage.getItem("zico-registration-confirmation")!),
-    ).toEqual({
-      email: "ada@example.com",
-      message: "Check email",
-      whatsapp: true,
+      onboarding_token: "invitation",
     });
-    expect(post).not.toHaveBeenCalled();
   });
-
   it.each([
-    new AxiosError("Network Error"),
-    error(500, "UNAVAILABLE"),
-    error(429, "RATE_LIMITED", undefined, { "retry-after": "20" }),
+    failure("SESSION_LOOKUP_FAILED", 500),
+    failure("INVALID_REFRESH_SESSION", 401),
   ])(
-    "keeps registration failures recoverable without automatic resubmission",
-    async (failure) => {
-      vi.spyOn(apiClient, "get").mockResolvedValue({
-        data: { valid: true, status: "PENDING" },
-      });
-      const post = vi.spyOn(apiClient, "post").mockRejectedValue(failure);
-      renderFlow("opaque");
-      await fill();
+    "retries only session loading after successful registration",
+    async (error) => {
+      const post = vi
+        .spyOn(apiClient, "post")
+        .mockResolvedValue({ status: 201, data: registered });
+      vi.mocked(authenticatedApiClient.get)
+        .mockRejectedValueOnce(error)
+        .mockResolvedValueOnce({ data: session });
+      invite();
+      await profile();
       await userEvent.click(
         screen.getByRole("button", { name: "Create account" }),
       );
-      await screen.findByRole("alert");
-      expect(screen.getByLabelText("Password")).toHaveValue(" Securepass1! ");
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Retry session" }),
+      );
+      await waitFor(() =>
+        expect(navigation.replace).toHaveBeenCalledWith("/account"),
+      );
       expect(post).toHaveBeenCalledTimes(1);
-      expect(navigation.replace).not.toHaveBeenCalled();
-      if (failure.response?.status === 429) {
-        expect(
-          screen.getByRole("button", { name: "Create account" }),
-        ).toBeDisabled();
-        expect(screen.getByRole("status")).toHaveTextContent(
-          "Try again in 20 seconds",
-        );
-      }
+      expect(authenticatedApiClient.get).toHaveBeenCalledTimes(2);
     },
   );
-
-  it("shows confirmation and removes the token URL when browser storage is blocked", async () => {
-    window.history.replaceState({}, "", "/register?token=private-onboarding");
-    vi.spyOn(apiClient, "get").mockResolvedValue({
-      data: { valid: true, status: "PENDING" },
-    });
-    vi.spyOn(apiClient, "post").mockResolvedValue({
-      status: 202,
-      data: { status_code: 202, message: "Check email" },
-    });
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("Storage blocked");
-    });
-    renderFlow("private-onboarding");
-    await fill();
+  it("validates required names and preserves profile input after an account conflict", async () => {
+    const post = vi
+      .spyOn(apiClient, "post")
+      .mockRejectedValue(failure("ACCOUNT_CONFLICT", 409));
+    invite();
+    await screen.findByLabelText("First name");
     await userEvent.click(
       screen.getByRole("button", { name: "Create account" }),
     );
     expect(
-      await screen.findByRole("heading", { name: "Check your email" }),
+      await screen.findByText("First name is required"),
     ).toBeInTheDocument();
-    expect(window.location.pathname).toBe("/register/success");
-    expect(window.location.search).toBe("");
-    expect(navigation.replace).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+    await profile();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create account" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Backend message",
+    );
+    expect(screen.getByLabelText("Business name")).toHaveValue("Stores");
+  });
+  it("restarts verification when a direct proof expires", async () => {
+    vi.spyOn(apiClient, "post")
+      .mockResolvedValueOnce({ data: challenge() })
+      .mockResolvedValueOnce({
+        data: { registration_challenge_token: "old-proof" },
+      })
+      .mockRejectedValueOnce(failure("REGISTRATION_PROOF_INVALID"));
+    render(<WebRegistrationForm />, { wrapper: QueryProvider });
+    await number();
+    await verify();
+    await profile();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create account" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Restart verification" }),
+    );
+    expect(screen.getByLabelText("WhatsApp number")).toBeInTheDocument();
+    expect(screen.queryByLabelText("First name")).not.toBeInTheDocument();
+  });
+  it("replaces a challenge and clears the old OTP on resend, and changing number clears verification", async () => {
+    let clock = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const post = vi
+      .spyOn(apiClient, "post")
+      .mockResolvedValueOnce({ data: challenge("first") })
+      .mockResolvedValueOnce({ data: challenge("second") })
+      .mockResolvedValueOnce({
+        data: { registration_challenge_token: "proof" },
+      });
+    render(<WebRegistrationForm />, { wrapper: QueryProvider });
+    await number();
+    fireEvent.change(screen.getByLabelText("Verification code"), {
+      target: { value: "999999" },
+    });
+    expect(
+      screen.getByRole("button", { name: /Resend code in/ }),
+    ).toBeDisabled();
+    clock += 61000;
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Resend code" })).toBeEnabled(),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Resend code" }));
+    expect(await screen.findByLabelText("Verification code")).toHaveValue("");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Change number" }),
+    );
+    expect(
+      screen.queryByLabelText("Verification code"),
+    ).not.toBeInTheDocument();
+    clock += 61000;
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Request code" }),
+      ).toBeEnabled(),
+    );
+    // Request again after changing the number; no OTP/proof survives.
+    post
+      .mockReset()
+      .mockResolvedValueOnce({ data: challenge("third") })
+      .mockResolvedValueOnce({
+        data: { registration_challenge_token: "proof" },
+      });
+    await number();
+    expect(screen.getByLabelText("Verification code")).toHaveValue("");
+    await verify();
+    expect(post).toHaveBeenLastCalledWith("/api/v1/auth/whatsapp-otp/verify", {
+      challenge_id: "third",
+      otp: "012345",
+    });
+  });
+  it("uses expiry and honors Retry-After on OTP requests", async () => {
+    const post = vi
+      .spyOn(apiClient, "post")
+      .mockResolvedValueOnce({ data: challenge("expired", Date.now() - 1000) });
+    render(<WebRegistrationForm />, { wrapper: QueryProvider });
+    await number();
+    expect(screen.getByRole("button", { name: "Verify code" })).toBeDisabled();
+    expect(screen.getByText(/This code has expired/)).toBeInTheDocument();
+    cleanup();
+    post.mockRejectedValue(
+      failure("RATE_LIMITED", 429, { "retry-after": "120" }),
+    );
+    render(<WebRegistrationForm />, { wrapper: QueryProvider });
+    fireEvent.change(screen.getByLabelText("WhatsApp number"), {
+      target: { value: "+2348012345678" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Request code" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("120 seconds");
+    expect(screen.getByRole("button", { name: "Request code" })).toBeDisabled();
+  });
+  it.each([
+    "ONBOARDING_TOKEN_INVALID",
+    "ONBOARDING_TOKEN_EXPIRED",
+    "ONBOARDING_TOKEN_CONSUMED",
+    "ONBOARDING_VERIFICATION_PENDING",
+  ])("handles invitation validation error %s", async (code) => {
+    vi.mocked(apiClient.get).mockRejectedValue(failure(code));
+    invite();
+    await waitFor(() =>
+      expect(
+        screen.queryByText(
+          "Please wait while we check your WhatsApp registration link.",
+        ),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByLabelText("First name")).not.toBeInTheDocument();
+    if (code === "ONBOARDING_VERIFICATION_PENDING")
+      expect(screen.getByText("Backend message")).toBeInTheDocument();
   });
 });

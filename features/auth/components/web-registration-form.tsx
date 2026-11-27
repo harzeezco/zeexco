@@ -1,134 +1,218 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useState } from "react";
-import { toast } from "sonner";
-import { normalizeApiError } from "@/lib/api-client";
-import { useForm } from "react-hook-form";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { retryAfterSeconds } from "@/lib/retry-after";
 import {
-  parseRegistrationError,
-  useRegisterWebMerchant,
+  requestWhatsAppOTP,
+  verifyWhatsAppOTP,
+  type WhatsAppChallenge,
 } from "../api/registration";
-import { useRetryAfter } from "../use-retry-after";
-import {
-  webRegistrationSchema,
-  type WebRegistrationFormData,
-} from "../schemas/registration";
-import { FormFeedback } from "./form-feedback";
-import { RegistrationFields } from "./registration-fields";
-import { RegistrationTerms } from "./registration-terms";
+import { parseRegistrationError } from "../api/registration-errors";
 import { WebRegistrationLayout } from "./web-registration-layout";
+import { RegistrationField } from "./registration-field";
+import { FormFeedback } from "./form-feedback";
 import { AccountSwitch } from "./account-switch";
-import {
-  RegistrationConfirmation,
-  saveRegistrationConfirmation,
-} from "./registration-success";
+import { MerchantProfileForm } from "./merchant-profile-form";
 
 export function WebRegistrationForm() {
-  const router = useRouter();
-  const mutation = useRegisterWebMerchant();
-  const [failureAt, setFailureAt] = useState(0);
-  const seconds = useRetryAfter(mutation.error, failureAt);
-  const form = useForm<WebRegistrationFormData>({
-    resolver: zodResolver(webRegistrationSchema),
-    defaultValues: {
-      first_name: "",
-      last_name: "",
-      business_name: "",
-      email: "",
-      password: "",
-    },
-    mode: "onBlur",
-  });
-
-  if (mutation.isSuccess && mutation.data) {
-    return (
-      <RegistrationConfirmation
-        email={mutation.variables?.email || form.getValues("email")}
-        message={mutation.data.message}
-      />
-    );
+  const [number, setNumber] = useState("");
+  const [challenge, setChallenge] = useState<WhatsAppChallenge | null>(null);
+  const [otp, setOTP] = useState("");
+  const [proof, setProof] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [retryAt, setRetryAt] = useState(0);
+  const [resendAt, setResendAt] = useState(0);
+  const [now, setNow] = useState(Date.now);
+  const locked = useRef(false);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, []);
+  const retrySeconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
+  const resendSeconds = Math.max(
+    0,
+    Math.ceil((Math.max(resendAt, retryAt) - now) / 1000),
+  );
+  const expired = Boolean(challenge && Date.parse(challenge.expires_at) <= now);
+  function restart() {
+    setChallenge(null);
+    setOTP("");
+    setProof(null);
+    setError("");
   }
-  const onSubmit = form.handleSubmit((values) => {
-    if (mutation.isPending || seconds > 0) return;
-    mutation.mutate(
-      {
-        first_name: values.first_name,
-        last_name: values.last_name,
-        business_name: values.business_name,
-        email: values.email,
-        password: values.password,
-      },
-      {
-        onSuccess: (response) => {
-          form.resetField("password");
-          const saved = saveRegistrationConfirmation({
-            email: values.email,
-            message:
-              response.message ||
-              "Your registration was successful. Verify your email to continue.",
-          });
-          if (saved) router.replace("/register/success");
-          else
-            window.history.replaceState(
-              window.history.state,
-              "",
-              "/register/success",
-            );
-        },
-        onError: (error) => {
-          setFailureAt(Date.now());
-          const details = normalizeApiError(error);
-          if (details.field && details.field in values) {
-            form.setError(details.field as keyof WebRegistrationFormData, {
-              type: "server",
-              message: details.message,
-            });
-          }
-          toast.error(details.message || parseRegistrationError(error));
-        },
-      },
-    );
-  });
-
+  async function request(resend = false) {
+    if (
+      locked.current ||
+      Date.now() < retryAt ||
+      (resend && Date.now() < resendAt)
+    )
+      return;
+    if (!/^\+[1-9]\d{7,14}$/.test(number.trim())) {
+      setError(
+        "Enter an international WhatsApp number with country code, for example +2348012345678.",
+      );
+      return;
+    }
+    locked.current = true;
+    setPending(true);
+    setError("");
+    setOTP("");
+    setProof(null);
+    // A resend starts a new challenge; never verify against the old one.
+    if (resend) setChallenge(null);
+    try {
+      const next = await requestWhatsAppOTP(number.trim());
+      setChallenge(next);
+      setResendAt(Date.now() + 60000);
+      setNow(Date.now());
+    } catch (failure) {
+      setError(parseRegistrationError(failure));
+      const until = Date.now() + retryAfterSeconds(failure) * 1000;
+      setRetryAt(until);
+      setNow(Date.now());
+    } finally {
+      locked.current = false;
+      setPending(false);
+    }
+  }
+  async function verify() {
+    if (locked.current || !challenge || expired || Date.now() < retryAt) return;
+    if (!/^\d{6}$/.test(otp)) {
+      setError("Enter the six-digit code.");
+      return;
+    }
+    locked.current = true;
+    setPending(true);
+    setError("");
+    try {
+      const result = await verifyWhatsAppOTP(challenge.challenge_id, otp);
+      setProof(result.registration_challenge_token);
+      setOTP("");
+      setChallenge(null);
+    } catch (failure) {
+      setError(parseRegistrationError(failure));
+      setRetryAt(Date.now() + retryAfterSeconds(failure) * 1000);
+      setNow(Date.now());
+    } finally {
+      locked.current = false;
+      setPending(false);
+    }
+  }
   return (
     <WebRegistrationLayout>
       <AccountSwitch page="register" />
-      <div className="mb-6">
-        <h1 className="m-0 text-[28px] leading-tight font-bold tracking-[-0.025em] text-[#14233d]">
-          Create your Zico account
-        </h1>
-        <p className="mt-2 mb-0 text-sm text-[#68778f]">
-          A simpler way to run your everyday business.
-        </p>
-      </div>
-
-      <form
-        onSubmit={onSubmit}
-        className="grid gap-4"
-        noValidate
-        aria-busy={mutation.isPending}
-      >
-        <RegistrationFields form={form} pending={mutation.isPending} />
-        {mutation.isError ? (
-          <FormFeedback message={parseRegistrationError(mutation.error)} />
-        ) : null}
-
-        {seconds > 0 ? (
-          <p role="status">Try again in {seconds} seconds.</p>
-        ) : null}
-        <Button
-          type="submit"
-          disabled={mutation.isPending || seconds > 0}
-          className="mt-1 h-11 w-full rounded-md bg-[#1f5bd8] text-sm font-bold text-white hover:bg-[#1749b7]"
-        >
-          {mutation.isPending ? "Creating account..." : "Create account"}
-        </Button>
-      </form>
-
-      <RegistrationTerms />
+      {proof ? (
+        <MerchantProfileForm
+          proof={{ registration_challenge_token: proof }}
+          restart={restart}
+        />
+      ) : (
+        <>
+          <h1 className="m-0 text-[28px] font-bold text-[#14233d]">
+            {challenge
+              ? "Verify your WhatsApp number"
+              : "Create your Zico account"}
+          </h1>
+          <p className="mt-2 mb-6 text-sm leading-6 text-[#68778f]">
+            {challenge
+              ? "If this number can receive WhatsApp verification, a code has been requested."
+              : "Start with your international WhatsApp number."}
+          </p>
+          <form
+            className="grid gap-4"
+            noValidate
+            aria-busy={pending}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void (challenge ? verify() : request());
+            }}
+          >
+            {challenge ? (
+              <>
+                <p className="text-sm">{number}</p>
+                <RegistrationField
+                  id="whatsapp-otp"
+                  label="Verification code"
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  type="text"
+                  maxLength={6}
+                  value={otp}
+                  onChange={(event) =>
+                    setOTP(event.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  disabled={pending}
+                  helperText="Enter all six digits, including any leading zeros."
+                />
+                {expired ? (
+                  <p role="status">
+                    This code has expired. Request a new code.
+                  </p>
+                ) : null}
+                <Button
+                  type="submit"
+                  disabled={pending || expired || retrySeconds > 0}
+                >
+                  {pending ? "Verifying..." : "Verify code"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={pending || resendSeconds > 0}
+                  onClick={() => void request(true)}
+                >
+                  {resendSeconds > 0
+                    ? "Resend code in " + resendSeconds + "s"
+                    : "Resend code"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={pending}
+                  onClick={restart}
+                >
+                  Change number
+                </Button>
+              </>
+            ) : (
+              <>
+                <RegistrationField
+                  id="whatsapp-number"
+                  label="WhatsApp number"
+                  type="tel"
+                  autoComplete="tel"
+                  placeholder="+2348012345678"
+                  value={number}
+                  onChange={(event) => {
+                    setNumber(event.target.value);
+                    setOTP("");
+                    setProof(null);
+                    setError("");
+                  }}
+                  disabled={pending}
+                />
+                <Button
+                  type="submit"
+                  disabled={pending || retrySeconds > 0 || resendSeconds > 0}
+                >
+                  {pending ? "Requesting code..." : "Request code"}
+                </Button>
+                {resendSeconds > 0 && retrySeconds === 0 ? (
+                  <p role="status">
+                    Request another code in {resendSeconds} seconds.
+                  </p>
+                ) : null}
+              </>
+            )}
+            {error ? <FormFeedback message={error} /> : null}
+            {retrySeconds > 0 ? (
+              <p role="status">Try again in {retrySeconds} seconds.</p>
+            ) : null}
+          </form>
+        </>
+      )}
     </WebRegistrationLayout>
   );
 }

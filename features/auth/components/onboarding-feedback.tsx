@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { normalizeApiError } from "@/lib/api-client";
 import {
   onboardingErrorCode,
   parseOnboardingError,
@@ -22,7 +23,7 @@ export function OnboardingFeedback({
     return (
       <RegistrationConfirmation
         email=""
-        message="Registration was already submitted. Open the activation link in your email to continue."
+        message={normalizeApiError(error).message}
         whatsapp
       />
     );

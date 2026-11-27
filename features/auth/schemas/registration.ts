@@ -1,7 +1,18 @@
 import { z } from "zod";
 
-const requiredName = (label: string) =>
-  z.string().trim().min(1, `${label} is required`);
+const requiredName = (label: string, max: number) =>
+  z
+    .string()
+    .transform((value) => value.trim().replace(/\s+/gu, " "))
+    .pipe(
+      z
+        .string()
+        .min(1, label + " is required")
+        .refine(
+          (value) => Array.from(value).length <= max,
+          label + " must be at most " + max + " characters",
+        ),
+    );
 
 export const passwordSchema = z
   .string()
@@ -28,31 +39,26 @@ export const passwordSchema = z
   );
 
 export const webRegistrationSchema = z.object({
-  first_name: requiredName("First name").max(
-    100,
-    "First name must be at most 100 characters",
-  ),
-  last_name: requiredName("Last name").max(
-    100,
-    "Last name must be at most 100 characters",
-  ),
-  business_name: requiredName("Business name").max(
-    200,
-    "Business name must be at most 200 characters",
-  ),
+  first_name: requiredName("First name", 100),
+  last_name: requiredName("Last name", 100),
+  business_name: requiredName("Business name", 200),
   email: z
     .string()
-    .trim()
-    .min(1, "Email is required")
-    .email("Please enter a valid email address")
-    .max(255),
-  password: passwordSchema,
+    .transform((value) => value.trim().toLowerCase())
+    .pipe(
+      z
+        .string()
+        .refine(
+          (value) => !value || z.string().email().safeParse(value).success,
+          "Please enter a valid email address",
+        )
+        .refine(
+          (value) => new TextEncoder().encode(value).length <= 255,
+          "Email must be at most 255 bytes",
+        ),
+    ),
 });
-
 export const whatsappRegistrationSchema = webRegistrationSchema;
-
 export type WebRegistrationFormData = z.infer<typeof webRegistrationSchema>;
 export type RegistrationFormData = WebRegistrationFormData;
-export type WhatsAppRegistrationFormData = z.infer<
-  typeof whatsappRegistrationSchema
->;
+export type WhatsAppRegistrationFormData = WebRegistrationFormData;
